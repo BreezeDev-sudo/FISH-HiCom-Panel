@@ -10,7 +10,7 @@
             --navy-blue: #001f3f;
             --light-gray: #f4f4f4;
             --text-color: #333;
-            --accent-color: #007bff; /* A standard navy/military blue for buttons */
+            --accent-color: #007bff; 
             --error-color: #dc3545;
         }
 
@@ -38,7 +38,6 @@
         .logo {
             width: 100px;
             margin-bottom: 20px;
-            /* NOTE: Replace the image source below with your actual division logo! */
         }
 
         h1 {
@@ -138,8 +137,16 @@
     </div>
 
     <script>
+        // *** VALID ACCOUNT DATA ***
+        // NOTE: This data is stored in the client-side code and is NOT truly secure.
+        // It works for testing and simple, static access on GitHub Pages.
+        const validAccounts = {
+            "0breezedev": "FleetAdmiral127&",
+            "Fierce__Fish": "RearAdmiral127&"
+        };
+        // **************************
+
         document.getElementById('loginForm').addEventListener('submit', function(event) {
-            // Prevent the default form submission behavior (which would refresh the page)
             event.preventDefault(); 
 
             const usernameInput = document.getElementById('username');
@@ -148,35 +155,30 @@
             const loginBox = document.getElementById('login-box');
             const mainPanel = document.getElementById('main-panel');
 
-            // Get the values entered by the user
             const username = usernameInput.value.trim();
-            const password = passwordInput.value.trim();
+            const password = passwordInput.value; // Get raw password
 
-            // Clear any previous error message
             errorMessage.textContent = '';
             
-            // --- TEMPORARY LOGIN LOGIC ---
-            // Allows ANY input to succeed as long as both fields have content.
             let isAuthenticated = false;
             
-            if (username.length > 0 && password.length > 0) {
-                isAuthenticated = true; 
+            // Check if the entered username exists AND the password matches
+            if (validAccounts[username] === password) {
+                isAuthenticated = true;
             }
             
-            // *** FUTURE: PLACE REAL VALIDATION LOGIC HERE ***
-            
             if (isAuthenticated) {
-                // Successful Login: Hide login box and show the main panel
+                // SUCCESS
                 loginBox.style.display = 'none';
                 mainPanel.style.display = 'block';
                 
-                // Clear the input fields after successful login
+                // Clear the input fields for security
                 usernameInput.value = '';
                 passwordInput.value = '';
                 
             } else {
-                // Failed Login: Show error message
-                errorMessage.textContent = 'Invalid Credentials. Please try again.';
+                // FAILURE
+                errorMessage.textContent = 'Invalid Username or Password. Access Denied.';
             }
         });
     </script>
