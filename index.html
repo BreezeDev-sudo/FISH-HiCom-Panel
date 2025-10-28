@@ -11,7 +11,7 @@
         import { getFirestore, collection, onSnapshot, query, orderBy, serverTimestamp, addDoc, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // GLOBAL FIREBASE SETUP (PLACEHOLDER CONFIG - REPLACE WITH YOUR OWN LATER)
-       const firebaseConfig = {
+const firebaseConfig = {
   apiKey: "AIzaSyALuA1aEeGCILi8aqI960Youp_0OdcZyRo",
   authDomain: "fish-hicom-panel.firebaseapp.com",
   projectId: "fish-hicom-panel",
@@ -30,25 +30,34 @@
                 db = getFirestore(app);
                 auth = getAuth(app);
                 
-                // Sign in anonymously for simple read/write access 
+                // *** CRITICAL CHANGE HERE: Ensure loadAnnouncements() runs only after sign-in success ***
                 signInAnonymously(auth).then(() => {
                     console.log("Firebase Anonymous Auth Complete. Database is ready.");
+                    // Only call the loader once we have a database connection
                     loadAnnouncements(); 
                 }).catch((error) => {
                     console.error("Firebase Auth Failed:", error);
+                    // Provide visual feedback if Firebase itself fails
+                    const errorElement = document.getElementById('announcements-list');
+                    if(errorElement) errorElement.innerHTML = '<p class="text-center" style="color:red;">Error: Failed to connect to Command Database. Check Console for details.</p>';
                 });
 
             } catch (error) {
                 console.error("Firebase initialization failed:", error);
+                const errorElement = document.getElementById('announcements-list');
+                if(errorElement) errorElement.innerHTML = '<p class="text-center" style="color:red;">Error: Database setup failed. Check config and console.</p>';
             }
         }
 
         // REAL-TIME ANNOUNCEMENT LOADER
         function loadAnnouncements() {
-            if (!db) return; 
+            // Check for db just in case, though it should be set by now
+            if (!db) {
+                console.error("DB is not initialized yet in loadAnnouncements.");
+                return;
+            }
 
             const announcementsCollection = collection(db, ANNOUNCEMENT_PATH);
-            // *** OPTIMIZATION: Limit to the 20 newest announcements ***
             const q = query(announcementsCollection, orderBy("timestamp", "desc"), limit(20));
 
             onSnapshot(q, (snapshot) => {
@@ -77,11 +86,14 @@
                     announcementsList.appendChild(announcementDiv);
                 });
             }, (error) => {
-                console.error("Error listening to announcements:", error);
+                console.error("Error listening to announcements (Permissions/Connection issue):", error);
+                // Display a clear error message to the user
+                const errorElement = document.getElementById('announcements-list');
+                if(errorElement) errorElement.innerHTML = '<p class="text-center" style="color:red;">Failed to retrieve announcements. Check Firebase Rules.</p>';
             });
         }
 
-        // ANNOUNCEMENT POSTER
+        // ANNOUNCEMENT POSTER (Remains the same)
         async function postAnnouncement(content) {
             const user = window.currentUsername; 
 
