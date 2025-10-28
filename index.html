@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>High Command Panel - Navy Division</title>
+
+    <style>
+        :root {
+            --navy-blue: #001f3f;
+            --light-gray: #f4f4f4;
+            --text-color: #333;
+            --accent-color: #007bff; /* A standard navy/military blue for buttons */
+            --error-color: #dc3545;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--navy-blue);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            background-color: var(--light-gray);
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+            color: var(--text-color);
+        }
+
+        .logo {
+            width: 100px;
+            margin-bottom: 20px;
+            /* NOTE: Replace the image source below with your actual division logo! */
+        }
+
+        h1 {
+            color: var(--navy-blue);
+            margin-bottom: 5px;
+            font-size: 24px;
+        }
+
+        p {
+            margin-bottom: 25px;
+            color: #666;
+        }
+
+        .input-group {
+            text-align: left;
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: var(--navy-blue);
+        }
+
+        input[type="text"], 
+        input[type="password"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+
+        button {
+            background-color: var(--accent-color);
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            width: 100%;
+            transition: background-color 0.3s ease;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        .error-text {
+            color: var(--error-color);
+            margin-top: 15px;
+            font-weight: bold;
+            height: 1.2em;
+        }
+
+        /* Style for the Main Panel */
+        #main-panel {
+            background-color: #fff;
+            border-left: 5px solid var(--accent-color);
+            padding: 50px 30px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="login-box" class="container">
+        <img src="https://via.placeholder.com/100x100?text=NAVY+LOGO" alt="Division Logo" class="logo">
+        <h1>High Command Access</h1>
+        <p>Navy Simulator Division - Restricted Access</p>
+        
+        <form id="loginForm">
+            <div class="input-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" placeholder="Enter High Command Username" required>
+            </div>
+            
+            <div class="input-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" placeholder="Enter Password" required>
+            </div>
+            
+            <button type="submit" id="loginButton">Log In</button>
+            <p id="error-message" class="error-text"></p>
+        </form>
+    </div>
+
+    <div id="main-panel" class="container" style="display: none;">
+        <h2>Welcome, Commander!</h2>
+        <p>Access Granted to Navy Division High Command Panel.</p>
+        <p>This is where you will build the rest of your panel features. Use the Log Out button below to test the login again.</p>
+        <button onclick="document.getElementById('main-panel').style.display='none'; document.getElementById('login-box').style.display='block';">Log Out</button>
+    </div>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', function(event) {
+            // Prevent the default form submission behavior (which would refresh the page)
+            event.preventDefault(); 
+
+            const usernameInput = document.getElementById('username');
+            const passwordInput = document.getElementById('password');
+            const errorMessage = document.getElementById('error-message');
+            const loginBox = document.getElementById('login-box');
+            const mainPanel = document.getElementById('main-panel');
+
+            // Get the values entered by the user
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value.trim();
+
+            // Clear any previous error message
+            errorMessage.textContent = '';
+            
+            // --- TEMPORARY LOGIN LOGIC ---
+            // Allows ANY input to succeed as long as both fields have content.
+            let isAuthenticated = false;
+            
+            if (username.length > 0 && password.length > 0) {
+                isAuthenticated = true; 
+            }
+            
+            // *** FUTURE: PLACE REAL VALIDATION LOGIC HERE ***
+            
+            if (isAuthenticated) {
+                // Successful Login: Hide login box and show the main panel
+                loginBox.style.display = 'none';
+                mainPanel.style.display = 'block';
+                
+                // Clear the input fields after successful login
+                usernameInput.value = '';
+                passwordInput.value = '';
+                
+            } else {
+                // Failed Login: Show error message
+                errorMessage.textContent = 'Invalid Credentials. Please try again.';
+            }
+        });
+    </script>
+</body>
+</html>
