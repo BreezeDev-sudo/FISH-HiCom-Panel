@@ -11,15 +11,14 @@
         import { getFirestore, collection, onSnapshot, query, orderBy, serverTimestamp, addDoc, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // GLOBAL FIREBASE SETUP (PLACEHOLDER CONFIG - REPLACE WITH YOUR OWN LATER)
-        const firebaseConfig = {
-            // **ACTION REQUIRED: REPLACE THESE WITH YOUR ACTUAL FIREBASE PROJECT CONFIG**
-            apiKey: "YOUR_API_KEY", 
-            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-            projectId: "YOUR_PROJECT_ID",
-            storageBucket: "YOUR_PROJECT_ID.appspot.com",
-            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-            appId: "YOUR_APP_ID" 
-        };
+       const firebaseConfig = {
+  apiKey: "AIzaSyALuA1aEeGCILi8aqI960Youp_0OdcZyRo",
+  authDomain: "fish-hicom-panel.firebaseapp.com",
+  projectId: "fish-hicom-panel",
+  storageBucket: "fish-hicom-panel.firebasestorage.app",
+  messagingSenderId: "69804423705",
+  appId: "1:69804423705:web:f155e8eecfa34c8a4e0888"
+};
         
         let db, auth;
         const ANNOUNCEMENT_PATH = `announcements`; 
