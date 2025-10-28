@@ -8,16 +8,17 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, onSnapshot, query, orderBy, serverTimestamp, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, onSnapshot, query, orderBy, serverTimestamp, addDoc, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // GLOBAL FIREBASE SETUP (PLACEHOLDER CONFIG - REPLACE WITH YOUR OWN LATER)
         const firebaseConfig = {
-              apiKey: "AIzaSyALuA1aEeGCILi8aqI960Youp_0OdcZyRo",
-              authDomain: "fish-hicom-panel.firebaseapp.com",
-              projectId: "fish-hicom-panel",
-              storageBucket: "fish-hicom-panel.firebasestorage.app",
-              messagingSenderId: "69804423705",
-              appId: "1:69804423705:web:f155e8eecfa34c8a4e0888"
+            // **ACTION REQUIRED: REPLACE THESE WITH YOUR ACTUAL FIREBASE PROJECT CONFIG**
+            apiKey: "YOUR_API_KEY", 
+            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_PROJECT_ID.appspot.com",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_APP_ID" 
         };
         
         let db, auth;
@@ -48,7 +49,8 @@
             if (!db) return; 
 
             const announcementsCollection = collection(db, ANNOUNCEMENT_PATH);
-            const q = query(announcementsCollection, orderBy("timestamp", "desc"));
+            // *** OPTIMIZATION: Limit to the 20 newest announcements ***
+            const q = query(announcementsCollection, orderBy("timestamp", "desc"), limit(20));
 
             onSnapshot(q, (snapshot) => {
                 const announcementsList = document.getElementById('announcements-list');
@@ -82,7 +84,6 @@
 
         // ANNOUNCEMENT POSTER
         async function postAnnouncement(content) {
-            // Get the current user from the main script's global variable
             const user = window.currentUsername; 
 
             if (!db || !user) {
@@ -104,7 +105,6 @@
 
                 document.getElementById('post-status').textContent = 'Announcement posted successfully!';
                 document.getElementById('announcement-input').value = '';
-                // Use functions exposed globally by the main script
                 window.hidePostForm(); 
                 window.openTab('announcements'); 
 
@@ -455,20 +455,15 @@
     </div>
 
     <script type="module">
-        // Import functions exposed from the module script above
         const { postAnnouncement, setupFirebase } = window;
         
-        // --- LOCAL STORAGE KEY ---
         const SESSION_KEY = "fishLegionHCUser";
 
-        // *** VALID ACCOUNT DATA (for front-end login) ***
         const validAccounts = {
             "0breezedev": "FleetAdmiral127&",
             "Fierce__Fish": "RearAdmiral127&"
         };
-        // ************************************************
 
-        // Global variable to hold the username after successful login
         let activeUser = null; 
         
         // --- LOGIN & SESSION MANAGEMENT ---
@@ -587,7 +582,6 @@
             event.preventDefault();
             const content = document.getElementById('announcement-input').value.trim();
             if (content.length > 0 && window.postAnnouncement) {
-                // Call the postAnnouncement function exposed from the module script
                 window.postAnnouncement(content); 
             }
         }
