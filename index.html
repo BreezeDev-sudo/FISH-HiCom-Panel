@@ -7,24 +7,21 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, onSnapshot, query, orderBy, serverTimestamp, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // GLOBAL FIREBASE SETUP (PLACEHOLDER CONFIG - REPLACE WITH YOUR OWN LATER)
-        // **NOTE:** Since this is GitHub Pages and we cannot truly use secure server-side keys, 
-        // the config is usually stored here for simplicity.
         const firebaseConfig = {
-            // Replace these with your actual Firebase Project Configuration when you set it up:
-            apiKey: "AIzaSyALuA1aEeGCILi8aqI960Youp_0OdcZyRo",
-            authDomain: "fish-hicom-panel.firebaseapp.com",
-            projectId: "fish-hicom-panel",
-            storageBucket: "fish-hicom-panel.firebasestorage.app",
-            messagingSenderId: "69804423705",
-            appId: "1:69804423705:web:f155e8eecfa34c8a4e0888"
+              apiKey: "AIzaSyALuA1aEeGCILi8aqI960Youp_0OdcZyRo",
+              authDomain: "fish-hicom-panel.firebaseapp.com",
+              projectId: "fish-hicom-panel",
+              storageBucket: "fish-hicom-panel.firebasestorage.app",
+              messagingSenderId: "69804423705",
+              appId: "1:69804423705:web:f155e8eecfa34c8a4e0888"
         };
         
-        let db, auth, currentUsername = null;
-        const ANNOUNCEMENT_PATH = `announcements`; // Simplified path
+        let db, auth;
+        const ANNOUNCEMENT_PATH = `announcements`; 
 
         // Function to set up Firebase services and authentication
         function setupFirebase() {
@@ -33,10 +30,9 @@
                 db = getFirestore(app);
                 auth = getAuth(app);
                 
-                // Sign in anonymously for simple read/write access (requires lenient Firestore rules)
+                // Sign in anonymously for simple read/write access 
                 signInAnonymously(auth).then(() => {
-                    console.log("Firebase Anonymous Auth Complete.");
-                    // After successful auth, start listening for announcements
+                    console.log("Firebase Anonymous Auth Complete. Database is ready.");
                     loadAnnouncements(); 
                 }).catch((error) => {
                     console.error("Firebase Auth Failed:", error);
@@ -86,28 +82,31 @@
 
         // ANNOUNCEMENT POSTER
         async function postAnnouncement(content) {
-            if (!db || !currentUsername) {
+            // Get the current user from the main script's global variable
+            const user = window.currentUsername; 
+
+            if (!db || !user) {
                 document.getElementById('post-status').textContent = 'Error: Not connected to database or user not logged in.';
                 return;
             }
 
             try {
-                // Determine rank based on logged-in user
                 let rank = 'High Command';
-                if (currentUsername === '0breezedev') rank = 'Fleet Admiral'; 
-                else if (currentUsername === 'Fierce__Fish') rank = 'Rear Admiral'; 
+                if (user === '0breezedev') rank = 'Fleet Admiral'; 
+                else if (user === 'Fierce__Fish') rank = 'Rear Admiral'; 
 
                 await addDoc(collection(db, ANNOUNCEMENT_PATH), {
                     content: content,
-                    senderUsername: currentUsername, // Use the successful login username
+                    senderUsername: user, 
                     senderRank: rank,
                     timestamp: serverTimestamp() 
                 });
 
                 document.getElementById('post-status').textContent = 'Announcement posted successfully!';
                 document.getElementById('announcement-input').value = '';
-                hidePostForm(); // Function defined in the script below
-                openTab('announcements'); // Function defined in the script below
+                // Use functions exposed globally by the main script
+                window.hidePostForm(); 
+                window.openTab('announcements'); 
 
             } catch (e) {
                 console.error("Error adding document: ", e);
@@ -118,7 +117,6 @@
         // Expose functions globally for the non-module script and HTML access
         window.setupFirebase = setupFirebase;
         window.postAnnouncement = postAnnouncement;
-        window.currentUsername = currentUsername;
 
     </script>
     
@@ -457,9 +455,12 @@
     </div>
 
     <script type="module">
-        // Import postAnnouncement from the module script above
+        // Import functions exposed from the module script above
         const { postAnnouncement, setupFirebase } = window;
         
+        // --- LOCAL STORAGE KEY ---
+        const SESSION_KEY = "fishLegionHCUser";
+
         // *** VALID ACCOUNT DATA (for front-end login) ***
         const validAccounts = {
             "0breezedev": "FleetAdmiral127&",
@@ -467,18 +468,17 @@
         };
         // ************************************************
 
-        // Variable to hold the username after successful login
+        // Global variable to hold the username after successful login
         let activeUser = null; 
         
-        // Login Logic
+        // --- LOGIN & SESSION MANAGEMENT ---
+
         document.getElementById('loginForm').addEventListener('submit', function(event) {
             event.preventDefault(); 
 
             const usernameInput = document.getElementById('username');
             const passwordInput = document.getElementById('password');
             const errorMessage = document.getElementById('error-message');
-            const loginBox = document.getElementById('login-box');
-            const mainPanel = document.getElementById('main-panel');
 
             const username = usernameInput.value.trim();
             const password = passwordInput.value;
@@ -492,31 +492,57 @@
             }
             
             if (isAuthenticated) {
-                // SUCCESS
-                loginBox.style.display = 'none';
-                mainPanel.style.display = 'block';
-                usernameInput.value = '';
-                passwordInput.value = '';
+                // 1. SAVE SESSION TO LOCAL STORAGE
+                localStorage.setItem(SESSION_KEY, username);
                 
-                // Store the active user for Firebase posting
-                activeUser = username; 
-                window.currentUsername = username; // Update the global variable in the other script block
+                // 2. LOG IN
+                completeLogin(username);
                 
-                // Set the initial active tab
-                openTab('home');
-
             } else {
                 // FAILURE
                 errorMessage.textContent = 'Invalid Username or Password. Access Denied.';
             }
         });
 
+        // Function to handle the transition and variable setup after a successful login (new or persistent)
+        function completeLogin(username) {
+            const loginBox = document.getElementById('login-box');
+            const mainPanel = document.getElementById('main-panel');
+            const usernameInput = document.getElementById('username');
+            const passwordInput = document.getElementById('password');
+            
+            loginBox.style.display = 'none';
+            mainPanel.style.display = 'block';
+            usernameInput.value = '';
+            passwordInput.value = '';
+            
+            // Set the global user variable
+            activeUser = username; 
+            window.currentUsername = username; // Used by the Firebase post function
+            
+            // Set the initial active tab
+            openTab('home');
+        }
+
         // Logout Function
         function logout() {
+            // 1. CLEAR SESSION
+            localStorage.removeItem(SESSION_KEY);
+            
+            // 2. LOG OUT
             document.getElementById('main-panel').style.display = 'none';
             document.getElementById('login-box').style.display = 'block';
             document.getElementById('error-message').textContent = '';
-            activeUser = null; // Clear active user on logout
+            activeUser = null; 
+        }
+
+        // Function to check for a saved session on page load
+        function checkSession() {
+            const savedUser = localStorage.getItem(SESSION_KEY);
+            if (savedUser && validAccounts[savedUser]) {
+                // User found in local storage and is a valid HC member
+                completeLogin(savedUser);
+            }
         }
 
         // --- TAB & VIEW SWITCHING ---
@@ -573,8 +599,8 @@
         window.hidePostForm = hidePostForm;
         window.handlePostForm = handlePostForm;
         
-        // Initialize Firebase on page load (now done with onload="setupFirebase()" in the body tag)
-        // This ensures the non-module script executes first, preventing the login break.
+        // --- INITIALIZATION ---
+        document.addEventListener('DOMContentLoaded', checkSession);
 
     </script>
 </body>
