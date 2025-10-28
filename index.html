@@ -3,15 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>High Command Panel - Navy Division</title>
+    <title>Fish Legion High Command Panel</title>
 
     <style>
         :root {
-            --navy-blue: #001f3f;
+            --navy-blue: #001f3f; /* Deep ocean blue */
             --light-gray: #f4f4f4;
             --text-color: #333;
-            --accent-color: #007bff; 
+            --accent-color: #007bff; /* Standard blue, can be adjusted for "fish" theme */
             --error-color: #dc3545;
+            --panel-bg: #e0e6ec; /* Lighter background for the main panel */
+            --tab-inactive: #c8d1db; /* Inactive tab color */
+            --tab-active: #ffffff; /* Active tab color */
+            --button-hover-darken: #0056b3;
         }
 
         body {
@@ -30,14 +34,15 @@
             border-radius: 10px;
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
             width: 100%;
-            max-width: 400px;
+            max-width: 800px; /* Increased max-width for the main panel */
             text-align: center;
             color: var(--text-color);
         }
 
-        .logo {
-            width: 100px;
-            margin-bottom: 20px;
+        /* Adjust login-box for the new width, keep it centered */
+        #login-box {
+            max-width: 400px; 
+            padding: 30px; /* Slightly reduced padding */
         }
 
         h1 {
@@ -88,7 +93,7 @@
         }
 
         button:hover {
-            background-color: #0056b3;
+            background-color: var(--button-hover-darken);
         }
 
         .error-text {
@@ -98,20 +103,131 @@
             height: 1.2em;
         }
 
-        /* Style for the Main Panel */
+        /* Main Panel Styling */
         #main-panel {
-            background-color: #fff;
+            background-color: var(--panel-bg);
             border-left: 5px solid var(--accent-color);
-            padding: 50px 30px;
+            padding: 0; /* Remove padding from container to let header/tabs take full width */
+            text-align: left; /* Adjust text alignment for internal content */
         }
+
+        .panel-header {
+            background-color: var(--navy-blue);
+            color: white;
+            padding: 20px 40px;
+            font-size: 28px;
+            font-weight: bold;
+            border-top-left-radius: 10px;
+            border-top-right-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .panel-header button { /* Logout button in header */
+            width: auto;
+            margin: 0;
+            padding: 8px 15px;
+            background-color: #dc3545; /* Red for logout */
+            font-size: 14px;
+        }
+
+        .panel-header button:hover {
+            background-color: #c82333;
+        }
+
+
+        /* Tab Navigation */
+        .tabs {
+            display: flex;
+            background-color: #e9ecef; /* Lighter background for tab bar */
+            border-bottom: 1px solid #dee2e6;
+            padding: 0 40px; /* Align with header padding */
+        }
+
+        .tab-button {
+            padding: 15px 25px;
+            cursor: pointer;
+            border: none;
+            background-color: var(--tab-inactive);
+            color: var(--navy-blue);
+            font-weight: bold;
+            font-size: 16px;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+            margin-right: 5px;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .tab-button:hover:not(.active) {
+            background-color: #d1dbec; /* Lighter hover for inactive tabs */
+        }
+
+        .tab-button.active {
+            background-color: var(--tab-active);
+            border-bottom: 1px solid var(--tab-active); /* Hide bottom border on active tab */
+            color: var(--accent-color);
+            box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
+        }
+
+        .tab-content {
+            padding: 30px 40px;
+            background-color: var(--tab-active); /* Content area background */
+            border-bottom-left-radius: 10px;
+            border-bottom-right-radius: 10px;
+        }
+
+        /* Styling for Home Tab Buttons */
+        .home-buttons-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); /* Responsive grid */
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .home-button {
+            background-color: var(--navy-blue); /* Dark background for cool buttons */
+            color: white;
+            padding: 30px 20px;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: bold;
+            text-align: center;
+            cursor: pointer;
+            transition: transform 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            border-bottom: 4px solid var(--accent-color); /* Underline effect */
+        }
+
+        .home-button:hover {
+            background-color: #003366; /* Slightly lighter navy on hover */
+            transform: translateY(-5px); /* Lift effect */
+            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+            border-bottom: 4px solid var(--button-hover-darken);
+        }
+
+        .home-button.important {
+            background-color: #28a745; /* Green for important actions */
+            border-bottom-color: #218838;
+        }
+        .home-button.important:hover {
+            background-color: #218838;
+            border-bottom-color: #1e7e34;
+        }
+
+        .home-button i { /* For FontAwesome icons if you add them later */
+            margin-bottom: 10px;
+            font-size: 2.5em;
+            display: block;
+        }
+
     </style>
 </head>
 <body>
 
     <div id="login-box" class="container">
-        <img src="https://via.placeholder.com/100x100?text=NAVY+LOGO" alt="Division Logo" class="logo">
         <h1>High Command Access</h1>
-        <p>Navy Simulator Division - Restricted Access</p>
+        <p>Fish Legion - Restricted Access</p>
         
         <form id="loginForm">
             <div class="input-group">
@@ -130,22 +246,52 @@
     </div>
 
     <div id="main-panel" class="container" style="display: none;">
-        <h2>Welcome, Commander!</h2>
-        <p>Access Granted to Navy Division High Command Panel.</p>
-        <p>This is where you will build the rest of your panel features. Use the Log Out button below to test the login again.</p>
-        <button onclick="document.getElementById('main-panel').style.display='none'; document.getElementById('login-box').style.display='block';">Log Out</button>
-    </div>
+        <div class="panel-header">
+            <span>Welcome, Commander!</span>
+            <button onclick="logout()">Log Out</button>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-button active" onclick="openTab('home')">Home</button>
+            </div>
+
+        <div id="home" class="tab-content">
+            <h2>Command Center Overview</h2>
+            <p>Quick access to essential Fish Legion High Command functions.</p>
+
+            <div class="home-buttons-grid">
+                <div class="home-button important">
+                    Make Announcement
+                </div>
+                <div class="home-button">
+                    View Roster
+                </div>
+                <div class="home-button">
+                    Schedule Event
+                </div>
+                <div class="home-button">
+                    View Statistics
+                </div>
+                <div class="home-button">
+                    Manage Settings
+                </div>
+                <div class="home-button">
+                    Help & Support
+                </div>
+            </div>
+        </div>
+
+        </div>
 
     <script>
         // *** VALID ACCOUNT DATA ***
-        // NOTE: This data is stored in the client-side code and is NOT truly secure.
-        // It works for testing and simple, static access on GitHub Pages.
         const validAccounts = {
             "0breezedev": "FleetAdmiral127&",
             "Fierce__Fish": "RearAdmiral127&"
         };
         // **************************
 
+        // Login Logic
         document.getElementById('loginForm').addEventListener('submit', function(event) {
             event.preventDefault(); 
 
@@ -156,31 +302,65 @@
             const mainPanel = document.getElementById('main-panel');
 
             const username = usernameInput.value.trim();
-            const password = passwordInput.value; // Get raw password
+            const password = passwordInput.value;
 
             errorMessage.textContent = '';
             
             let isAuthenticated = false;
             
-            // Check if the entered username exists AND the password matches
             if (validAccounts[username] === password) {
                 isAuthenticated = true;
             }
             
             if (isAuthenticated) {
-                // SUCCESS
                 loginBox.style.display = 'none';
                 mainPanel.style.display = 'block';
-                
-                // Clear the input fields for security
                 usernameInput.value = '';
                 passwordInput.value = '';
-                
+                // Set the initial active tab (Home)
+                openTab('home');
+
             } else {
-                // FAILURE
                 errorMessage.textContent = 'Invalid Username or Password. Access Denied.';
             }
         });
+
+        // Logout Function
+        function logout() {
+            document.getElementById('main-panel').style.display = 'none';
+            document.getElementById('login-box').style.display = 'block';
+            document.getElementById('error-message').textContent = ''; // Clear error on logout
+        }
+
+        // Tab Switching Logic
+        function openTab(tabName) {
+            // Get all tab content elements and hide them
+            var i, tabcontent, tabbuttons;
+            tabcontent = document.getElementsByClassName("tab-content");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+
+            // Get all tab buttons and remove the "active" class
+            tabbuttons = document.getElementsByClassName("tab-button");
+            for (i = 0; i < tabbuttons.length; i++) {
+                tabbuttons[i].className = tabbuttons[i].className.replace(" active", "");
+            }
+
+            // Show the current tab, and add an "active" class to the button that opened the tab
+            document.getElementById(tabName).style.display = "block";
+            event.currentTarget.className += " active";
+        }
+
+        // Initialize with Home tab active when main panel is shown
+        // This is called by login success, but added here for clarity if testing directly
+        document.addEventListener('DOMContentLoaded', () => {
+             // If you want to auto-display main-panel for dev, uncomment this and the line below
+             // document.getElementById('login-box').style.display = 'none';
+             // document.getElementById('main-panel').style.display = 'block';
+             // openTab('home'); // Ensure Home tab is active on load if bypassing login for dev
+        });
+
     </script>
 </body>
 </html>
