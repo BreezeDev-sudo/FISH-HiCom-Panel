@@ -5,62 +5,58 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fish Legion High Command Panel</title>
 
-    <!-- FIREBASE SDK IMPORTS (MUST be before your script starts) -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, onSnapshot, query, orderBy, serverTimestamp, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // 1. GLOBAL FIREBASE SETUP (Using environment variables)
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const authToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        // GLOBAL FIREBASE SETUP (PLACEHOLDER CONFIG - REPLACE WITH YOUR OWN LATER)
+        // **NOTE:** Since this is GitHub Pages and we cannot truly use secure server-side keys, 
+        // the config is usually stored here for simplicity.
+        const firebaseConfig = {
+            // Replace these with your actual Firebase Project Configuration when you set it up:
+            apiKey: "AIzaSyALuA1aEeGCILi8aqI960Youp_0OdcZyRo",
+            authDomain: "fish-hicom-panel.firebaseapp.com",
+            projectId: "fish-hicom-panel",
+            storageBucket: "fish-hicom-panel.firebasestorage.app",
+            messagingSenderId: "69804423705",
+            appId: "1:69804423705:web:f155e8eecfa34c8a4e0888"
+        };
         
-        let db, auth, userId = null;
-        const ANNOUNCEMENT_PATH = `artifacts/${appId}/public/data/announcements`;
+        let db, auth, currentUsername = null;
+        const ANNOUNCEMENT_PATH = `announcements`; // Simplified path
 
         // Function to set up Firebase services and authentication
-        async function setupFirebase() {
+        function setupFirebase() {
             try {
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
                 
-                // Sign in with provided token or anonymously if not available
-                if (authToken) {
-                    await signInWithCustomToken(auth, authToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
-
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        console.log("Firebase Auth Ready. User ID:", userId);
-                        // Start loading real-time data only after auth is ready
-                        loadAnnouncements();
-                    } else {
-                        console.log("No user signed in.");
-                    }
+                // Sign in anonymously for simple read/write access (requires lenient Firestore rules)
+                signInAnonymously(auth).then(() => {
+                    console.log("Firebase Anonymous Auth Complete.");
+                    // After successful auth, start listening for announcements
+                    loadAnnouncements(); 
+                }).catch((error) => {
+                    console.error("Firebase Auth Failed:", error);
                 });
 
             } catch (error) {
-                console.error("Firebase setup failed:", error);
-                document.getElementById('error-message').textContent = 'Error: Database connection failed.';
+                console.error("Firebase initialization failed:", error);
             }
         }
 
-        // 2. REAL-TIME ANNOUNCEMENT LOADER
+        // REAL-TIME ANNOUNCEMENT LOADER
         function loadAnnouncements() {
-            if (!db) return; // Wait until DB is initialized
+            if (!db) return; 
 
             const announcementsCollection = collection(db, ANNOUNCEMENT_PATH);
-            // Query: Get all announcements, ordered by timestamp descending (newest on top)
             const q = query(announcementsCollection, orderBy("timestamp", "desc"));
 
             onSnapshot(q, (snapshot) => {
                 const announcementsList = document.getElementById('announcements-list');
-                announcementsList.innerHTML = ''; // Clear existing announcements
+                announcementsList.innerHTML = ''; 
                 
                 if (snapshot.empty) {
                     announcementsList.innerHTML = '<p class="text-center">No announcements have been made yet.</p>';
@@ -70,12 +66,12 @@
                 snapshot.forEach((doc) => {
                     const data = doc.data();
                     const timestamp = data.timestamp ? new Date(data.timestamp.toDate()).toLocaleString() : 'N/A';
-
+                    
                     const announcementDiv = document.createElement('div');
                     announcementDiv.className = 'announcement-card';
                     announcementDiv.innerHTML = `
                         <div class="card-header">
-                            <span class="sender">Commander: ${data.senderId || 'Unknown'}</span>
+                            <span class="sender">Commander: ${data.senderUsername || 'Unknown'}</span>
                             <span class="time">${timestamp}</span>
                         </div>
                         <p class="content">${data.content}</p>
@@ -83,37 +79,35 @@
                     `;
                     announcementsList.appendChild(announcementDiv);
                 });
-                console.log("Announcements updated in real-time.");
             }, (error) => {
                 console.error("Error listening to announcements:", error);
             });
         }
 
-        // 3. ANNOUNCEMENT POSTER
+        // ANNOUNCEMENT POSTER
         async function postAnnouncement(content) {
-            if (!db || !userId) {
-                document.getElementById('post-status').textContent = 'Error: Not connected to database or user not authenticated.';
+            if (!db || !currentUsername) {
+                document.getElementById('post-status').textContent = 'Error: Not connected to database or user not logged in.';
                 return;
             }
 
             try {
-                // Determine rank based on known users (temporary, should be server-side in Roblox)
+                // Determine rank based on logged-in user
                 let rank = 'High Command';
-                if (userId === '0breezedev') rank = 'Fleet Admiral'; 
-                else if (userId === 'Fierce__Fish') rank = 'Rear Admiral'; 
+                if (currentUsername === '0breezedev') rank = 'Fleet Admiral'; 
+                else if (currentUsername === 'Fierce__Fish') rank = 'Rear Admiral'; 
 
                 await addDoc(collection(db, ANNOUNCEMENT_PATH), {
                     content: content,
-                    senderId: userId, // Store the Firebase User ID
+                    senderUsername: currentUsername, // Use the successful login username
                     senderRank: rank,
-                    timestamp: serverTimestamp() // Firestore server timestamp is critical for ordering
+                    timestamp: serverTimestamp() 
                 });
 
                 document.getElementById('post-status').textContent = 'Announcement posted successfully!';
                 document.getElementById('announcement-input').value = '';
-                // Automatically switch back to the viewing area after posting
-                document.getElementById('announcement-view-area').style.display = 'block';
-                document.getElementById('announcement-post-form').style.display = 'none';
+                hidePostForm(); // Function defined in the script below
+                openTab('announcements'); // Function defined in the script below
 
             } catch (e) {
                 console.error("Error adding document: ", e);
@@ -121,13 +115,13 @@
             }
         }
 
-        // Expose functions globally for HTML access
+        // Expose functions globally for the non-module script and HTML access
         window.setupFirebase = setupFirebase;
         window.postAnnouncement = postAnnouncement;
-        window.db = db; // Expose for debugging if needed
-    </script>
+        window.currentUsername = currentUsername;
 
-    <!-- Custom CSS Styles -->
+    </script>
+    
     <style>
         :root {
             --navy-blue: #001f3f;
@@ -362,7 +356,7 @@
             color: #6c757d;
         }
         .content {
-            white-space: pre-wrap; /* Preserve formatting */
+            white-space: pre-wrap; 
             color: var(--text-color);
             line-height: 1.5;
             margin: 0;
@@ -383,9 +377,8 @@
         }
     </style>
 </head>
-<body>
+<body onload="setupFirebase()">
 
-    <!-- LOGIN CONTAINER -->
     <div id="login-box" class="container">
         <h1>High Command Access</h1>
         <p>Fish Legion - Restricted Access</p>
@@ -406,7 +399,6 @@
         </form>
     </div>
 
-    <!-- MAIN PANEL (Hidden until successful login) -->
     <div id="main-panel" class="container" style="display: none;">
         <div class="panel-header">
             <span>Fish Legion Command Console</span>
@@ -418,7 +410,6 @@
             <button id="tab-announcements" class="tab-button" onclick="openTab('announcements')">Announcements</button>
         </div>
 
-        <!-- HOME TAB CONTENT -->
         <div id="home" class="tab-content">
             <h2>Command Center Overview</h2>
             <p>Quick access to essential Fish Legion High Command functions.</p>
@@ -439,10 +430,8 @@
             </div>
         </div>
 
-        <!-- ANNOUNCEMENTS TAB CONTENT -->
         <div id="announcements" class="tab-content" style="display: none;">
             
-            <!-- Announcement Viewing Area -->
             <div id="announcement-view-area">
                 <h3 class="text-center">Active Announcements (Newest First)</h3>
                 <div id="announcements-list">
@@ -451,7 +440,6 @@
                 <button onclick="showPostForm()" style="margin-top: 20px; max-width: 300px; float: right;">New Announcement</button>
             </div>
             
-            <!-- Announcement Creation Form -->
             <div id="announcement-post-form" style="display: none;">
                 <h3>Create New Announcement</h3>
                 <form id="postForm" onsubmit="handlePostForm(event)">
@@ -468,8 +456,10 @@
 
     </div>
 
-    <!-- MAIN JAVASCRIPT LOGIC -->
-    <script>
+    <script type="module">
+        // Import postAnnouncement from the module script above
+        const { postAnnouncement, setupFirebase } = window;
+        
         // *** VALID ACCOUNT DATA (for front-end login) ***
         const validAccounts = {
             "0breezedev": "FleetAdmiral127&",
@@ -477,9 +467,8 @@
         };
         // ************************************************
 
-        // --- AUTH & INITIALIZATION ---
-        // Run Firebase setup when the DOM is ready
-        document.addEventListener('DOMContentLoaded', setupFirebase);
+        // Variable to hold the username after successful login
+        let activeUser = null; 
         
         // Login Logic
         document.getElementById('loginForm').addEventListener('submit', function(event) {
@@ -509,6 +498,10 @@
                 usernameInput.value = '';
                 passwordInput.value = '';
                 
+                // Store the active user for Firebase posting
+                activeUser = username; 
+                window.currentUsername = username; // Update the global variable in the other script block
+                
                 // Set the initial active tab
                 openTab('home');
 
@@ -523,29 +516,24 @@
             document.getElementById('main-panel').style.display = 'none';
             document.getElementById('login-box').style.display = 'block';
             document.getElementById('error-message').textContent = '';
-            // In a real app, you might sign out the Firebase user here: auth.signOut();
+            activeUser = null; // Clear active user on logout
         }
 
         // --- TAB & VIEW SWITCHING ---
 
         // Tab Switching Logic
         function openTab(tabName) {
-            // Get all tab content elements and hide them
             const tabcontents = document.getElementsByClassName("tab-content");
             for (let i = 0; i < tabcontents.length; i++) {
                 tabcontents[i].style.display = "none";
             }
 
-            // Get all tab buttons and remove the "active" class
             const tabbuttons = document.getElementsByClassName("tab-button");
             for (let i = 0; i < tabbuttons.length; i++) {
                 tabbuttons[i].classList.remove("active");
             }
 
-            // Show the current tab content
             document.getElementById(tabName).style.display = "block";
-            
-            // Add "active" class to the button that opened the tab
             document.getElementById(`tab-${tabName}`).classList.add("active");
             
             // Ensure the viewing area is shown when opening the Announcements tab
@@ -556,9 +544,7 @@
         
         // Functions for switching between announcement views
         function showPostForm() {
-             // 1. Switch to Announcements tab if not already there
             openTab('announcements');
-            // 2. Hide viewing area and show form
             document.getElementById('announcement-view-area').style.display = 'none';
             document.getElementById('announcement-post-form').style.display = 'block';
             document.getElementById('post-status').textContent = '';
@@ -566,7 +552,6 @@
         }
 
         function hidePostForm() {
-            // Hide the form and show the viewing area
             document.getElementById('announcement-post-form').style.display = 'none';
             document.getElementById('announcement-view-area').style.display = 'block';
         }
@@ -575,19 +560,21 @@
         function handlePostForm(event) {
             event.preventDefault();
             const content = document.getElementById('announcement-input').value.trim();
-            if (content.length > 0) {
-                // Post the announcement using the function defined in the module script
-                window.postAnnouncement(content);
+            if (content.length > 0 && window.postAnnouncement) {
+                // Call the postAnnouncement function exposed from the module script
+                window.postAnnouncement(content); 
             }
         }
 
-        // Ensure Home tab is active on initial load
-        document.addEventListener('DOMContentLoaded', () => {
-             // Default to showing login box
-             if (document.getElementById('main-panel').style.display === 'block') {
-                openTab('home');
-             }
-        });
+        // Expose functions globally for HTML access
+        window.logout = logout;
+        window.openTab = openTab;
+        window.showPostForm = showPostForm;
+        window.hidePostForm = hidePostForm;
+        window.handlePostForm = handlePostForm;
+        
+        // Initialize Firebase on page load (now done with onload="setupFirebase()" in the body tag)
+        // This ensures the non-module script executes first, preventing the login break.
 
     </script>
 </body>
