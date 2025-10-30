@@ -104,8 +104,10 @@ const firebaseConfig = {
 
             try {
                 let rank = 'High Command';
-                if (user === '0breezedev') rank = 'Fleet Admiral'; 
-                else if (user === 'Fierce__Fish') rank = 'Rear Admiral'; 
+                if (user === '0breezedev') rank = 'Archon'; 
+                else if (user === 'Fierce__Fish') rank = 'Vice Admiral'; 
+                else if (user === 'Lost_Player') rank = 'Admiral'; 
+                else if (user === 'Gl1tch_4ce') rank = 'Fleet Admiral'; 
 
                 await addDoc(collection(db, ANNOUNCEMENT_PATH), {
                     content: content,
