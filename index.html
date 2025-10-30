@@ -13,7 +13,14 @@
         // --- MANDATORY FIREBASE ENVIRONMENT VARIABLES ---
         // These variables are injected by the Canvas platform for collaborative apps.
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const firebaseConfig = {
+  apiKey: "AIzaSyALuA1aEeGCILi8aqI960Youp_0OdcZyRo",
+  authDomain: "fish-hicom-panel.firebaseapp.com",
+  projectId: "fish-hicom-panel",
+  storageBucket: "fish-hicom-panel.firebasestorage.app",
+  messagingSenderId: "69804423705",
+  appId: "1:69804423705:web:f155e8eecfa34c8a4e0888"
+};
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
         let db, auth;
