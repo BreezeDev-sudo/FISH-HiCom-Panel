@@ -77,7 +77,7 @@ const firebaseConfig = {
                     announcementDiv.className = 'announcement-card';
                     announcementDiv.innerHTML = `
                         <div class="card-header">
-                            <span class="sender">Commander: ${data.senderUsername || 'Unknown'}</span>
+                            <span class="sender">${data.senderUsername || 'Unknown'}</span>
                             <span class="time">${timestamp}</span>
                         </div>
                         <p class="content">${data.content}</p>
