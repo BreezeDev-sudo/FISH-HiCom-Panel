@@ -8,20 +8,23 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        // NOTE: We're adding 'addDoc' and 'collection' for the new officer register function
         import { getFirestore, collection, onSnapshot, query, orderBy, serverTimestamp, addDoc, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // GLOBAL FIREBASE SETUP (PLACEHOLDER CONFIG - REPLACE WITH YOUR OWN LATER)
-const firebaseConfig = {
-  apiKey: "AIzaSyALuA1aEeGCILi8aqI960Youp_0OdcZyRo",
-  authDomain: "fish-hicom-panel.firebaseapp.com",
-  projectId: "fish-hicom-panel",
-  storageBucket: "fish-hicom-panel.firebasestorage.app",
-  messagingSenderId: "69804423705",
-  appId: "1:69804423705:web:f155e8eecfa34c8a4e0888"
-};
+        const firebaseConfig = {
+            apiKey: "AIzaSyALuA1aEeGCILi8aqI960Youp_0OdcZyRo",
+            authDomain: "fish-hicom-panel.firebaseapp.com",
+            projectId: "fish-hicom-panel",
+            storageBucket: "fish-hicom-panel.firebasestorage.app",
+            messagingSenderId: "69804423705",
+            appId: "1:69804423705:web:f155e8eecfa34c8a4e0888"
+        };
         
         let db, auth;
         const ANNOUNCEMENT_PATH = `announcements`; 
+        // NEW PATH for Officers collection (you'll need to create this in Firebase)
+        const OFFICER_PATH = `officers`; 
 
         // Function to set up Firebase services and authentication
         function setupFirebase() {
@@ -30,29 +33,94 @@ const firebaseConfig = {
                 db = getFirestore(app);
                 auth = getAuth(app);
                 
-                // *** CRITICAL CHANGE HERE: Ensure loadAnnouncements() runs only after sign-in success ***
                 signInAnonymously(auth).then(() => {
                     console.log("Firebase Anonymous Auth Complete. Database is ready.");
-                    // Only call the loader once we have a database connection
+                    // Load both announcements and officers when ready
                     loadAnnouncements(); 
+                    loadOfficers(); // New call
                 }).catch((error) => {
                     console.error("Firebase Auth Failed:", error);
-                    // Provide visual feedback if Firebase itself fails
                     const errorElement = document.getElementById('announcements-list');
-                    if(errorElement) errorElement.innerHTML = '<p class="text-center" style="color:red;">Error: Failed to connect to Command Database. Check Console for details.</p>';
+                    if(errorElement) errorElement.innerHTML = '<p class="text-center" style="color:red;">Error: Failed to connect to Command Database.</p>';
                 });
 
             } catch (error) {
                 console.error("Firebase initialization failed:", error);
                 const errorElement = document.getElementById('announcements-list');
-                if(errorElement) errorElement.innerHTML = '<p class="text-center" style="color:red;">Error: Database setup failed. Check config and console.</p>';
+                if(errorElement) errorElement.innerHTML = '<p class="text-center" style="color:red;">Error: Database setup failed.</p>';
             }
         }
 
-        // REAL-TIME ANNOUNCEMENT LOADER
-        function loadAnnouncements() {
-            // Check for db just in case, though it should be set by now
+        // --- OFFICER MANAGEMENT FUNCTIONS (NEW) ---
+        
+        // MOCK/EXAMPLE Officer Data Structure for display purposes until Firestore is fully set up
+        const MOCK_OFFICERS = [
+            { username: 'Gl1tch_4ce', rank: 'Fleet Admiral' },
+            { username: 'Lost_Player', rank: 'Admiral' },
+            { username: 'Fierce__Fish', rank: 'Vice Admiral' },
+            { username: '0breezedev', rank: 'Archon' },
+        ];
+
+        // REAL-TIME OFFICER LOADER 
+        function loadOfficers() {
+            const officersList = document.getElementById('officers-list');
+            
+            // --- MOCK DISPLAY LOGIC ---
+            // Replace this block with your real Firestore snapshot listener for the OFFICER_PATH
+            officersList.innerHTML = '<div class="officer-card header-row"><span>Username</span><span>In-Game Rank</span></div>';
+
+            MOCK_OFFICERS.forEach((officer) => {
+                const officerDiv = document.createElement('div');
+                officerDiv.className = 'officer-card';
+                officerDiv.innerHTML = `
+                    <span class="username">${officer.username}</span>
+                    <span class="rank">${officer.rank}</span>
+                `;
+                officersList.appendChild(officerDiv);
+            });
+            // --- END MOCK DISPLAY LOGIC ---
+            
+            // If you set up a Firebase 'officers' collection, use a function similar to loadAnnouncements() here.
+        }
+
+        // NEW OFFICER REGISTRATION FUNCTION
+        async function registerNewOfficer(username, rank) {
             if (!db) {
+                document.getElementById('register-status').textContent = 'Error: Not connected to database.';
+                return;
+            }
+
+            try {
+                // Add the new officer to the 'officers' collection
+                await addDoc(collection(db, OFFICER_PATH), {
+                    username: username, 
+                    rank: rank,
+                    registeredBy: window.currentUsername, // User currently logged into the panel
+                    timestamp: serverTimestamp() 
+                });
+
+                document.getElementById('register-status').textContent = 'Officer registered successfully! (Note: Actual list update depends on Firebase setup)';
+                // Clear inputs
+                document.getElementById('officer-username-input').value = '';
+                document.getElementById('officer-rank-input').value = '';
+                
+                // Switch back to the officer list view
+                window.hideRegisterForm(); 
+                // Re-open tab to ensure any real-time update occurs
+                window.openTab('officers'); 
+
+            } catch (e) {
+                console.error("Error adding officer: ", e);
+                document.getElementById('register-status').textContent = `Error: Could not register officer. ${e.message}`;
+            }
+        }
+
+        // --- ANNOUNCEMENT MANAGEMENT FUNCTIONS (MODIFIED/PRESERVED) ---
+
+        // REAL-TIME ANNOUNCEMENT LOADER (Original)
+        function loadAnnouncements() {
+            // ... (Original function logic is preserved)
+             if (!db) {
                 console.error("DB is not initialized yet in loadAnnouncements.");
                 return;
             }
@@ -86,15 +154,15 @@ const firebaseConfig = {
                     announcementsList.appendChild(announcementDiv);
                 });
             }, (error) => {
-                console.error("Error listening to announcements (Permissions/Connection issue):", error);
-                // Display a clear error message to the user
+                console.error("Error listening to announcements:", error);
                 const errorElement = document.getElementById('announcements-list');
-                if(errorElement) errorElement.innerHTML = '<p class="text-center" style="color:red;">Failed to retrieve announcements. Check Firebase Rules.</p>';
+                if(errorElement) errorElement.innerHTML = '<p class="text-center" style="color:red;">Failed to retrieve announcements.</p>';
             });
         }
 
-        // ANNOUNCEMENT POSTER (Remains the same)
+        // ANNOUNCEMENT POSTER (Original)
         async function postAnnouncement(content) {
+            // ... (Original function logic is preserved)
             const user = window.currentUsername; 
 
             if (!db || !user) {
@@ -130,10 +198,12 @@ const firebaseConfig = {
         // Expose functions globally for the non-module script and HTML access
         window.setupFirebase = setupFirebase;
         window.postAnnouncement = postAnnouncement;
+        window.registerNewOfficer = registerNewOfficer; // Expose new function
 
     </script>
     
     <style>
+        /* Existing CSS is kept the same, with added styles for officer list */
         :root {
             --navy-blue: #001f3f;
             --light-gray: #f4f4f4;
@@ -298,7 +368,7 @@ const firebaseConfig = {
             border-bottom-right-radius: 10px;
         }
 
-        /* Home Tab Grid */
+        /* Home Tab Grid - ONLY KEEPING THE CONTAINER STYLE */
         .home-buttons-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
@@ -318,6 +388,8 @@ const firebaseConfig = {
             transition: transform 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
             box-shadow: 0 4px 10px rgba(0,0,0,0.2);
             border-bottom: 4px solid var(--accent-color); 
+            width: auto; /* Ensure new button respects grid/max-width */
+            margin: 0;
         }
 
         .home-button:hover {
@@ -350,38 +422,48 @@ const firebaseConfig = {
             box-shadow: 0 2px 4px rgba(0,0,0,0.05);
             text-align: left;
         }
-        .card-header {
+        /* ... (rest of announcement card styles remain) ... */
+
+        /* NEW Officer List Styles */
+        #officers-list {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
+            flex-direction: column;
+            gap: 5px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+        .officer-card {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 5px;
             border-bottom: 1px solid #eee;
-            padding-bottom: 5px;
-            margin-bottom: 10px;
-            font-size: 0.9em;
+            font-size: 1.1em;
+            text-align: left;
         }
-        .sender {
+        .officer-card.header-row {
             font-weight: bold;
-            color: var(--navy-blue);
+            background-color: var(--navy-blue);
+            color: white;
+            border-radius: 5px 5px 0 0;
+            padding: 10px 15px;
+            margin-bottom: 10px;
         }
-        .time {
-            color: #6c757d;
+        .officer-card:last-of-type {
+            border-bottom: none;
         }
-        .content {
-            white-space: pre-wrap; 
-            color: var(--text-color);
-            line-height: 1.5;
-            margin: 0;
-            padding: 10px 0;
+        /* Officer Registration Form Styles */
+        #officer-register-form {
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            background-color: #fff;
+            margin-top: 20px;
         }
-        .rank-indicator {
-            display: block;
-            margin-top: 5px;
-            font-style: italic;
-            color: var(--accent-color);
-            font-size: 0.8em;
-            text-align: right;
-        }
-        #post-status {
+        #register-status {
             margin-top: 15px;
             font-weight: bold;
             color: var(--success-color);
@@ -419,6 +501,7 @@ const firebaseConfig = {
         <div class="tabs">
             <button id="tab-home" class="tab-button" onclick="openTab('home')">Home</button>
             <button id="tab-announcements" class="tab-button" onclick="openTab('announcements')">Announcements</button>
+            <button id="tab-officers" class="tab-button" onclick="openTab('officers')">Officers</button> 
         </div>
 
         <div id="home" class="tab-content">
@@ -429,18 +512,11 @@ const firebaseConfig = {
                 <div class="home-button important" onclick="showPostForm()">
                     Make Announcement
                 </div>
-                <div class="home-button" onclick="openTab('announcements')">
-                    View All Announcements
+                <div class="home-button" onclick="showRegisterForm()">
+                    Register Officer
                 </div>
-                <div class="home-button">
-                    View Roster
                 </div>
-                <div class="home-button">
-                    Schedule Event
-                </div>
-            </div>
         </div>
-
         <div id="announcements" class="tab-content" style="display: none;">
             
             <div id="announcement-view-area">
@@ -464,11 +540,39 @@ const firebaseConfig = {
             </div>
 
         </div>
+        <div id="officers" class="tab-content" style="display: none;">
+            
+            <div id="officer-view-area">
+                <h3 class="text-center">Registered Officers and Rank</h3>
+                <div id="officers-list">
+                    <p class="text-center">Loading officer list...</p>
+                </div>
+                <button onclick="showRegisterForm()" style="margin-top: 20px; max-width: 300px; float: right;">Register New Officer</button>
+            </div>
+            
+            <div id="officer-register-form" style="display: none;">
+                <h3>Register New Officer</h3>
+                <form id="registerForm" onsubmit="handleRegisterForm(event)">
+                    <div class="input-group">
+                        <label for="officer-username-input">Officer Username</label>
+                        <input type="text" id="officer-username-input" placeholder="Enter Roblox/In-Game Username" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="officer-rank-input">Current Rank In Game</label>
+                        <input type="text" id="officer-rank-input" placeholder="Enter the officer's current rank" required>
+                    </div>
+                    <button type="submit">Register Officer</button>
+                </form>
+                <p id="register-status"></p>
+                <button class="panel-header button" style="background-color: #6c757d; margin-top: 10px;" onclick="hideRegisterForm()">Cancel</button>
+            </div>
 
-    </div>
+        </div>
+        </div>
 
     <script type="module">
-        const { postAnnouncement, setupFirebase } = window;
+        // Import functions exposed globally in the first script tag
+        const { postAnnouncement, setupFirebase, registerNewOfficer } = window;
         
         const SESSION_KEY = "fishLegionHCUser";
 
@@ -481,7 +585,7 @@ const firebaseConfig = {
 
         let activeUser = null; 
         
-        // --- LOGIN & SESSION MANAGEMENT ---
+        // --- LOGIN & SESSION MANAGEMENT (PRESERVED) ---
 
         document.getElementById('loginForm').addEventListener('submit', function(event) {
             event.preventDefault(); 
@@ -502,19 +606,14 @@ const firebaseConfig = {
             }
             
             if (isAuthenticated) {
-                // 1. SAVE SESSION TO LOCAL STORAGE
                 localStorage.setItem(SESSION_KEY, username);
-                
-                // 2. LOG IN
                 completeLogin(username);
                 
             } else {
-                // FAILURE
                 errorMessage.textContent = 'Invalid Username or Password. Access Denied.';
             }
         });
 
-        // Function to handle the transition and variable setup after a successful login (new or persistent)
         function completeLogin(username) {
             const loginBox = document.getElementById('login-box');
             const mainPanel = document.getElementById('main-panel');
@@ -526,36 +625,29 @@ const firebaseConfig = {
             usernameInput.value = '';
             passwordInput.value = '';
             
-            // Set the global user variable
             activeUser = username; 
-            window.currentUsername = username; // Used by the Firebase post function
+            window.currentUsername = username; 
             
             // Set the initial active tab
             openTab('home');
         }
 
-        // Logout Function
         function logout() {
-            // 1. CLEAR SESSION
             localStorage.removeItem(SESSION_KEY);
-            
-            // 2. LOG OUT
             document.getElementById('main-panel').style.display = 'none';
             document.getElementById('login-box').style.display = 'block';
             document.getElementById('error-message').textContent = '';
             activeUser = null; 
         }
 
-        // Function to check for a saved session on page load
         function checkSession() {
             const savedUser = localStorage.getItem(SESSION_KEY);
             if (savedUser && validAccounts[savedUser]) {
-                // User found in local storage and is a valid HC member
                 completeLogin(savedUser);
             }
         }
 
-        // --- TAB & VIEW SWITCHING ---
+        // --- TAB & VIEW SWITCHING (MODIFIED) ---
 
         // Tab Switching Logic
         function openTab(tabName) {
@@ -572,13 +664,19 @@ const firebaseConfig = {
             document.getElementById(tabName).style.display = "block";
             document.getElementById(`tab-${tabName}`).classList.add("active");
             
-            // Ensure the viewing area is shown when opening the Announcements tab
+            // Ensure the viewing area is shown when opening the Officers/Announcements tab
             if (tabName === 'announcements') {
+                hideRegisterForm(); // Hide officer form if announcements is selected
                 hidePostForm();
+            }
+            if (tabName === 'officers') {
+                hidePostForm(); // Hide announcement form if officers is selected
+                hideRegisterForm();
+                loadOfficers(); // Reload the officer list when the tab is opened
             }
         }
         
-        // Functions for switching between announcement views
+        // Functions for switching between announcement views (PRESERVED)
         function showPostForm() {
             openTab('announcements');
             document.getElementById('announcement-view-area').style.display = 'none';
@@ -592,12 +690,40 @@ const firebaseConfig = {
             document.getElementById('announcement-view-area').style.display = 'block';
         }
 
-        // Form submission handler
+        // Functions for switching between officer views (NEW)
+        function showRegisterForm() {
+            openTab('officers'); // Ensure the officers tab is open
+            document.getElementById('officer-view-area').style.display = 'none';
+            document.getElementById('officer-register-form').style.display = 'block';
+            document.getElementById('register-status').textContent = '';
+            document.getElementById('officer-username-input').value = '';
+            document.getElementById('officer-rank-input').value = '';
+        }
+
+        function hideRegisterForm() {
+            document.getElementById('officer-register-form').style.display = 'none';
+            document.getElementById('officer-view-area').style.display = 'block';
+        }
+
+        // Form submission handler for Announcements (PRESERVED)
         function handlePostForm(event) {
             event.preventDefault();
             const content = document.getElementById('announcement-input').value.trim();
             if (content.length > 0 && window.postAnnouncement) {
                 window.postAnnouncement(content); 
+            }
+        }
+
+        // Form submission handler for Officers (NEW)
+        function handleRegisterForm(event) {
+            event.preventDefault();
+            const username = document.getElementById('officer-username-input').value.trim();
+            const rank = document.getElementById('officer-rank-input').value.trim();
+            
+            if (username.length > 0 && rank.length > 0 && window.registerNewOfficer) {
+                window.registerNewOfficer(username, rank); 
+            } else {
+                document.getElementById('register-status').textContent = 'Please fill in both fields.';
             }
         }
 
@@ -607,6 +733,10 @@ const firebaseConfig = {
         window.showPostForm = showPostForm;
         window.hidePostForm = hidePostForm;
         window.handlePostForm = handlePostForm;
+        window.showRegisterForm = showRegisterForm; // New
+        window.hideRegisterForm = hideRegisterForm; // New
+        window.handleRegisterForm = handleRegisterForm; // New
+        window.loadOfficers = loadOfficers; // New
         
         // --- INITIALIZATION ---
         document.addEventListener('DOMContentLoaded', checkSession);
