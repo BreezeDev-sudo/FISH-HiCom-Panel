@@ -7,24 +7,21 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, onSnapshot, query, orderBy, serverTimestamp, addDoc, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, query, orderBy, serverTimestamp, addDoc, limit, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // GLOBAL FIREBASE SETUP (PLACEHOLDER CONFIG - REPLACE WITH YOUR OWN LATER)
-        // NOTE: In a real environment, these would be populated by the Canvas platform variables.
-        const firebaseConfig = {
-            apiKey: "AIzaSyALuA1aEeGCILi8aqI960Youp_0OdcZyRo",
-            authDomain: "fish-hicom-panel.firebaseapp.com",
-            projectId: "fish-hicom-panel",
-            storageBucket: "fish-hicom-panel.firebasestorage.app",
-            messagingSenderId: "69804423705",
-            appId: "1:69804423705:web:f155e8eecfa34c8a4e0888"
-        };
+        // --- MANDATORY FIREBASE ENVIRONMENT VARIABLES ---
+        // These variables are injected by the Canvas platform for collaborative apps.
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
         let db, auth;
-        // Firebase Collection Paths
-        const ANNOUNCEMENT_PATH = `announcements`; 
-        const OFFICER_PATH = `officers`; 
+        let userId = null;
+
+        // Firebase Collection Paths (Using the mandated public path for shared data)
+        const ANNOUNCEMENT_PATH = `artifacts/${appId}/public/data/announcements`; 
+        const OFFICER_PATH = `artifacts/${appId}/public/data/officers`; 
 
         // Function to set up Firebase services and authentication
         function setupFirebase() {
@@ -33,11 +30,23 @@
                 db = getFirestore(app);
                 auth = getAuth(app);
                 
-                signInAnonymously(auth).then(() => {
-                    console.log("Firebase Anonymous Auth Complete. Database is ready.");
-                    // Load both announcements and officers when ready
-                    loadAnnouncements(); 
-                    loadOfficers(); 
+                const signInPromise = initialAuthToken 
+                    ? signInWithCustomToken(auth, initialAuthToken)
+                    : signInAnonymously(auth);
+
+                signInPromise.then(() => {
+                    onAuthStateChanged(auth, (user) => {
+                        if (user) {
+                            userId = user.uid;
+                            window.currentUserId = userId; // Expose userId globally
+                            console.log(`Firebase Auth Complete. User ID: ${userId}`);
+                            // Load both announcements and officers when ready
+                            loadAnnouncements(); 
+                            loadOfficers(); 
+                        } else {
+                            console.log("User signed out or failed to authenticate.");
+                        }
+                    });
                 }).catch((error) => {
                     console.error("Firebase Auth Failed:", error);
                     const errorElement = document.getElementById('announcements-list');
@@ -69,15 +78,17 @@
 
             // Real-time listener
             onSnapshot(q, (snapshot) => {
-                officersList.innerHTML = '<div class="officer-card header-row"><span>Username</span><span>In-Game Rank</span></div>';
+                // Updated header to include the Action column
+                officersList.innerHTML = '<div class="officer-card header-row"><span>Username</span><span>In-Game Rank</span><span>Action</span></div>';
 
                 if (snapshot.empty) {
-                    officersList.innerHTML += '<p class="text-center">No officers registered yet.</p>';
+                    officersList.innerHTML += '<p class="text-center" style="grid-column: 1 / -1; margin-top: 15px;">No officers registered yet.</p>';
                     return;
                 }
 
                 snapshot.forEach((doc) => {
                     const officer = doc.data();
+                    const officerId = doc.id; // Get the document ID for deletion
                     const officerDiv = document.createElement('div');
                     officerDiv.className = 'officer-card';
                     const safeUsername = officer.username || 'N/A';
@@ -86,6 +97,7 @@
                     officerDiv.innerHTML = `
                         <span class="username">${safeUsername}</span>
                         <span class="rank">${safeRank}</span>
+                        <button class="delete-btn" onclick="window.deleteOfficer('${officerId}')">X</button>
                     `;
                     officersList.appendChild(officerDiv);
                 });
@@ -101,13 +113,14 @@
                 document.getElementById('register-status').textContent = 'Error: Not connected to database.';
                 return;
             }
+            document.getElementById('register-status').textContent = 'Registering officer...';
 
             try {
                 // Add the new officer to the 'officers' collection
                 await addDoc(collection(db, OFFICER_PATH), {
                     username: username, 
                     rank: rank,
-                    registeredBy: window.currentUsername, // User currently logged into the panel
+                    registeredBy: window.currentUsername || 'Unknown High Command',
                     timestamp: serverTimestamp() 
                 });
 
@@ -129,11 +142,32 @@
             }
         }
 
-        // --- ANNOUNCEMENT MANAGEMENT FUNCTIONS (MODIFIED/PRESERVED) ---
+        // DELETE OFFICER FUNCTION
+        async function deleteOfficer(officerId) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return;
+            }
+
+            // Using a simple modal approach for confirmation since alert() is forbidden
+            const result = confirmDeletion();
+
+            if (result) {
+                try {
+                    const docRef = doc(db, OFFICER_PATH, officerId);
+                    await deleteDoc(docRef);
+                    console.log("Officer deleted successfully:", officerId);
+                } catch (e) {
+                    console.error("Error deleting officer: ", e);
+                }
+            }
+        }
+        
+        // --- ANNOUNCEMENT MANAGEMENT FUNCTIONS (PRESERVED) ---
 
         // REAL-TIME ANNOUNCEMENT LOADER (Original)
         function loadAnnouncements() {
-             if (!db) {
+            if (!db) {
                 console.error("DB is not initialized yet in loadAnnouncements.");
                 return;
             }
@@ -182,9 +216,11 @@
                 document.getElementById('post-status').textContent = 'Error: Not connected to database or user not logged in.';
                 return;
             }
+            document.getElementById('post-status').textContent = 'Posting announcement...';
 
             try {
                 let rank = 'High Command';
+                // Rank logic based on logged-in username (from the validAccounts list)
                 if (user === '0breezedev') rank = 'Archon'; 
                 else if (user === 'Fierce__Fish') rank = 'Vice Admiral'; 
                 else if (user === 'Lost_Player') rank = 'Admiral'; 
@@ -214,7 +250,14 @@
         // Expose functions globally for the non-module script and HTML access
         window.setupFirebase = setupFirebase;
         window.postAnnouncement = postAnnouncement;
-        window.registerNewOfficer = registerNewOfficer; // Expose new function
+        window.registerNewOfficer = registerNewOfficer; 
+        window.deleteOfficer = deleteOfficer; // Expose new function
+        window.loadOfficers = loadOfficers; // Expose loadOfficers
+        
+        // Custom confirmation modal replacement since alert/confirm are forbidden
+        function confirmDeletion() {
+            return confirm("Are you sure you want to delete this officer from the roster?");
+        }
 
     </script>
     
@@ -465,7 +508,7 @@
         }
 
 
-        /* NEW Officer List Styles */
+        /* Officer List Styles */
         #officers-list {
             display: flex;
             flex-direction: column;
@@ -477,7 +520,8 @@
         }
         .officer-card {
             display: grid;
-            grid-template-columns: 2fr 1fr;
+            grid-template-columns: 2fr 1fr 60px; /* Added 60px column for action/delete */
+            align-items: center;
             padding: 10px;
             background-color: #fff;
             border-radius: 5px;
@@ -493,6 +537,7 @@
             padding: 10px 15px;
             margin-bottom: 10px;
             border-bottom: none;
+            grid-template-columns: 2fr 1fr 60px; /* Ensure header matches content grid */
         }
         .officer-card:last-of-type {
             border-bottom: none;
@@ -510,10 +555,31 @@
             font-weight: bold;
             color: var(--success-color);
             min-height: 1.2em; /* Ensure space is reserved */
+            text-align: center;
         }
         .text-center {
             text-align: center;
         }
+        
+        /* Delete Button Style */
+        .delete-btn {
+            background-color: var(--error-color);
+            color: white;
+            padding: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: bold;
+            width: 40px;
+            height: 30px;
+            transition: background-color 0.3s ease;
+            margin: auto; /* Center the button */
+        }
+        .delete-btn:hover {
+            background-color: #a0101e;
+        }
+        
     </style>
 </head>
 <body onload="setupFirebase()">
@@ -618,10 +684,9 @@
 
     <script type="module">
         // Import functions exposed globally in the first script tag
-        const { postAnnouncement, setupFirebase, registerNewOfficer, loadOfficers } = window;
+        const { postAnnouncement, setupFirebase, registerNewOfficer, deleteOfficer, loadOfficers } = window;
         
-        // NOTE: Since we are using hardcoded session management for demo purposes, 
-        // we must keep it to prevent needing local storage for persistence.
+        // NOTE: Keeping the session management local for simple demo login
         const SESSION_KEY = "fishLegionHCUser";
 
         const validAccounts = {
@@ -633,7 +698,7 @@
 
         let activeUser = null; 
         
-        // --- LOGIN & SESSION MANAGEMENT (PRESERVED) ---
+        // --- LOGIN & SESSION MANAGEMENT ---
 
         document.getElementById('loginForm').addEventListener('submit', function(event) {
             event.preventDefault(); 
@@ -695,7 +760,7 @@
             }
         }
 
-        // --- TAB & VIEW SWITCHING (MODIFIED) ---
+        // --- TAB & VIEW SWITCHING ---
 
         // Tab Switching Logic
         function openTab(tabName) {
@@ -714,7 +779,7 @@
             
             // Manage sub-views when switching tabs
             if (tabName === 'announcements') {
-                hideRegisterForm(); // Hide officer form if announcements is selected
+                hideRegisterForm(true); // Hide officer form if announcements is selected
                 hidePostForm(true);
             }
             if (tabName === 'officers') {
@@ -724,7 +789,7 @@
             }
         }
         
-        // Functions for switching between announcement views (PRESERVED)
+        // Functions for switching between announcement views
         function showPostForm() {
             openTab('announcements');
             document.getElementById('announcement-view-area').style.display = 'none';
@@ -735,12 +800,12 @@
 
         function hidePostForm(force = false) {
             if (document.getElementById('announcements').style.display === 'block' || force) {
-                 document.getElementById('announcement-post-form').style.display = 'none';
-                 document.getElementById('announcement-view-area').style.display = 'block';
+                document.getElementById('announcement-post-form').style.display = 'none';
+                document.getElementById('announcement-view-area').style.display = 'block';
             }
         }
 
-        // Functions for switching between officer views (NEW)
+        // Functions for switching between officer views (IMPLEMENTED)
         function showRegisterForm() {
             openTab('officers'); // Ensure the officers tab is open
             document.getElementById('officer-view-area').style.display = 'none';
@@ -757,7 +822,7 @@
             }
         }
 
-        // Form submission handler for Announcements (PRESERVED)
+        // Form submission handler for Announcements
         function handlePostForm(event) {
             event.preventDefault();
             const content = document.getElementById('announcement-input').value.trim();
@@ -766,34 +831,31 @@
             }
         }
 
-        // Form submission handler for Officers (NEW)
+        // Form submission handler for Officers (IMPLEMENTED)
         function handleRegisterForm(event) {
             event.preventDefault();
             const username = document.getElementById('officer-username-input').value.trim();
             const rank = document.getElementById('officer-rank-input').value.trim();
-            
+
             if (username.length > 0 && rank.length > 0 && window.registerNewOfficer) {
-                // Displaying a status message while we wait for the registration call
-                document.getElementById('register-status').textContent = 'Registering officer...';
-                window.registerNewOfficer(username, rank); 
+                window.registerNewOfficer(username, rank);
             } else {
-                document.getElementById('register-status').textContent = 'Please fill in both fields.';
+                 document.getElementById('register-status').textContent = 'Error: Please fill both fields.';
             }
         }
 
         // Expose functions globally for HTML access
-        window.logout = logout;
         window.openTab = openTab;
+        window.logout = logout;
         window.showPostForm = showPostForm;
         window.hidePostForm = hidePostForm;
         window.handlePostForm = handlePostForm;
-        window.showRegisterForm = showRegisterForm; // New
-        window.hideRegisterForm = hideRegisterForm; // New
-        window.handleRegisterForm = handleRegisterForm; // New
-        
-        // --- INITIALIZATION ---
-        document.addEventListener('DOMContentLoaded', checkSession);
+        window.showRegisterForm = showRegisterForm;
+        window.hideRegisterForm = hideRegisterForm;
+        window.handleRegisterForm = handleRegisterForm;
 
+        // Check for existing session on page load
+        checkSession();
     </script>
 </body>
 </html>
