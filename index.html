@@ -8,7 +8,8 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, onSnapshot, query, orderBy, serverTimestamp, addDoc, limit, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // Import updateDoc for editing
+        import { getFirestore, collection, onSnapshot, query, orderBy, serverTimestamp, addDoc, limit, doc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- MANDATORY FIREBASE ENVIRONMENT VARIABLES ---
         // These variables are injected by the Canvas platform for collaborative apps.
@@ -114,10 +115,17 @@
                         const safeUsername = officer.username || 'N/A';
                         const safeRank = officer.rank || 'N/A';
                         
+                        // Use template literals for easier HTML string construction
+                        const escapedUsername = safeUsername.replace(/'/g, "\\'");
+                        const escapedRank = safeRank.replace(/'/g, "\\'");
+
                         officerDiv.innerHTML = `
                             <span class="username">${safeUsername}</span>
                             <span class="rank">${safeRank}</span>
-                            <button class="delete-btn" onclick="window.deleteOfficer('${officerId}')">X</button>
+                            <div class="action-buttons">
+                                <button class="edit-btn" onclick="window.showEditModal('${officerId}', '${escapedUsername}', '${escapedRank}')">Edit</button>
+                                <button class="delete-btn" onclick="window.deleteOfficer('${officerId}')">X</button>
+                            </div>
                         `;
                         officersList.appendChild(officerDiv);
                     }
@@ -187,6 +195,27 @@
                 } catch (e) {
                     console.error("Error deleting officer: ", e);
                 }
+            }
+        }
+
+        // --- NEW --- UPDATE OFFICER FUNCTION
+        async function updateOfficer(officerId, newUsername, newRank) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return false;
+            }
+            
+            try {
+                const docRef = doc(db, OFFICER_PATH, officerId);
+                await updateDoc(docRef, {
+                    username: newUsername,
+                    rank: newRank
+                });
+                console.log("Officer updated successfully:", officerId);
+                return true;
+            } catch (e) {
+                console.error("Error updating officer: ", e);
+                return false;
             }
         }
         
@@ -473,6 +502,7 @@
         window.postAnnouncement = postAnnouncement;
         window.registerNewOfficer = registerNewOfficer; 
         window.deleteOfficer = deleteOfficer; 
+        window.updateOfficer = updateOfficer; // <-- NEW
         window.loadOfficers = loadOfficers; 
         window.logNewEvent = logNewEvent; 
         window.deleteEvent = deleteEvent; 
@@ -492,6 +522,8 @@
             --tab-active: #ffffff;
             --button-hover-darken: #0056b3;
             --success-color: #28a745;
+            --edit-color: #17a2b8; /* Added color for edit button */
+            --edit-hover-color: #117a8b;
         }
 
         body {
@@ -739,7 +771,8 @@
         }
         .officer-card {
             display: grid;
-            grid-template-columns: 2fr 1fr 60px; /* Added 60px column for action/delete */
+            /* Updated grid to fit edit/delete buttons */
+            grid-template-columns: 2fr 1.5fr 110px; 
             align-items: center;
             padding: 10px;
             background-color: #fff;
@@ -756,7 +789,8 @@
             padding: 10px 15px;
             margin-bottom: 10px;
             border-bottom: none;
-            grid-template-columns: 2fr 1fr 60px; /* Ensure header matches content grid */
+            /* Ensure header matches content grid */
+            grid-template-columns: 2fr 1.5fr 110px; 
         }
         .officer-card:last-of-type {
             border-bottom: none;
@@ -780,9 +814,15 @@
             text-align: center;
         }
         
-        /* Delete Button Style */
-        .delete-btn {
-            background-color: var(--error-color);
+        /* Action Button Container */
+        .action-buttons {
+            display: flex;
+            gap: 5px;
+            justify-content: flex-end;
+        }
+
+        /* Edit/Delete Button Styles */
+        .delete-btn, .edit-btn {
             color: white;
             padding: 5px;
             border: none;
@@ -790,14 +830,24 @@
             cursor: pointer;
             font-size: 0.9em;
             font-weight: bold;
-            width: 40px;
+            width: 50px; /* Slightly wider */
             height: 30px;
             transition: background-color 0.3s ease;
-            margin: auto; /* Center the button */
+            margin: 0;
+        }
+        .delete-btn {
+            background-color: var(--error-color);
         }
         .delete-btn:hover {
             background-color: #a0101e;
         }
+        .edit-btn {
+            background-color: var(--edit-color);
+        }
+        .edit-btn:hover {
+            background-color: var(--edit-hover-color);
+        }
+
 
         /* NEW Event List Styles (CLEANED UP) */
         #events-list {
@@ -875,6 +925,60 @@
             color: var(--success-color);
             min-height: 1.2em; 
             text-align: center;
+        }
+
+        /* --- NEW: Officer Edit Modal Styles --- */
+        .modal-overlay {
+            display: none; /* Hidden by default */
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.5); /* Dim background */
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: auto;
+            padding: 30px;
+            border: 1px solid #888;
+            border-radius: 10px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            text-align: left;
+        }
+        .modal-content h3 {
+            text-align: center;
+            color: var(--navy-blue);
+            margin-top: 0;
+        }
+        .modal-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .modal-buttons button {
+            width: auto;
+            padding: 10px 20px;
+        }
+        .modal-buttons .cancel-btn {
+            background-color: #6c757d;
+        }
+        .modal-buttons .cancel-btn:hover {
+            background-color: #5a6268;
+        }
+        #edit-status {
+            text-align: center;
+            color: var(--error-color);
+            font-weight: bold;
+            min-height: 1.2em;
+            margin-top: 15px;
         }
         
     </style>
@@ -985,6 +1089,7 @@
                             <option value="Lieutenant Commander">Lieutenant Commander</option>
                             <option value="Commander">Commander</option>
                             <option value="Captain">Captain</option>
+                            <option value="Marshal">Marshal</option>
                             <option value="Rear Admiral">Rear Admiral</option>
                             <option value="Vice Admiral">Vice Admiral</option>
                             <option value="Admiral">Admiral</option>
@@ -1039,9 +1144,53 @@
         </div>
     </div>
 
+    <!-- --- NEW: Officer Edit Modal --- -->
+    <div id="edit-officer-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Edit Officer Details</h3>
+            <form id="edit-officer-form" onsubmit="handleEditForm(event)">
+                <!-- Hidden input to store the document ID -->
+                <input type="hidden" id="edit-officer-id">
+                
+                <div class="input-group">
+                    <label for="edit-officer-username">Officer Username</label>
+                    <input type="text" id="edit-officer-username" required>
+                </div>
+                
+                <div class="input-group">
+                    <label for="edit-officer-rank">Current Rank In Game</label>
+                    <select id="edit-officer-rank" required>
+                        <option value="" disabled>Select a rank</option>
+                        <option value="Junior Officer">Junior Officer</option>
+                        <option value="Warrant Officer">Warrant Officer</option>
+                        <option value="Chief Warrant Officer">Chief Warrant Officer</option>
+                        <option value="Ensign">Ensign</option>
+                        <option value="Lieutenant">Lieutenant</option>
+                        <option value="Lieutenant Commander">Lieutenant Commander</option>
+                        <option value="Commander">Commander</option>
+                        <option value="Captain">Captain</option>
+                        <option value="Marshal">Marshal</option>
+                        <option value="Rear Admiral">Rear Admiral</option>
+                        <option value="Vice Admiral">Vice Admiral</option>
+                        <option value="Admiral">Admiral</option>
+                        <option value="Fleet Admiral">Fleet Admiral</option>
+                    </select>
+                </div>
+                
+                <p id="edit-status"></p>
+
+                <div class="modal-buttons">
+                    <button type="button" class="cancel-btn" onclick="hideEditModal()">Cancel</button>
+                    <button type="submit" style="background-color: var(--success-color);">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+
     <script type="module">
         // Import functions exposed globally in the first script tag
-        const { postAnnouncement, setupFirebase, registerNewOfficer, deleteOfficer, loadOfficers, logNewEvent, deleteEvent, loadEvents } = window;
+        const { postAnnouncement, setupFirebase, registerNewOfficer, deleteOfficer, updateOfficer, loadOfficers, logNewEvent, deleteEvent, loadEvents } = window;
         
         // NOTE: Keeping the session management local for simple demo login
         const SESSION_KEY = "fishLegionHCUser";
@@ -1206,6 +1355,21 @@
             }
         }
 
+        // --- NEW: Modal Control Functions ---
+        function showEditModal(officerId, currentUsername, currentRank) {
+            const modal = document.getElementById('edit-officer-modal');
+            document.getElementById('edit-officer-id').value = officerId;
+            document.getElementById('edit-officer-username').value = currentUsername;
+            document.getElementById('edit-officer-rank').value = currentRank;
+            document.getElementById('edit-status').textContent = '';
+            modal.style.display = 'flex';
+        }
+
+        function hideEditModal() {
+            const modal = document.getElementById('edit-officer-modal');
+            modal.style.display = 'none';
+        }
+
         // NEW FUNCTION: Handles conditional display of event/training fields
         function updateEventTypeFields() {
             const typeSelect = document.getElementById('event-type-select');
@@ -1262,6 +1426,36 @@
                  document.getElementById('register-status').textContent = 'Error: Please fill both fields.';
             }
         }
+
+        // --- NEW: Form submission handler for Edit Officer Modal ---
+        async function handleEditForm(event) {
+            event.preventDefault();
+            const officerId = document.getElementById('edit-officer-id').value;
+            const newUsername = document.getElementById('edit-officer-username').value.trim();
+            const newRank = document.getElementById('edit-officer-rank').value;
+            const statusEl = document.getElementById('edit-status');
+
+            if (!officerId || !newUsername || !newRank) {
+                statusEl.textContent = 'Error: All fields are required.';
+                return;
+            }
+
+            statusEl.textContent = 'Saving...';
+            statusEl.style.color = 'var(--navy-blue)';
+
+            const success = await window.updateOfficer(officerId, newUsername, newRank);
+
+            if (success) {
+                statusEl.textContent = 'Officer updated successfully!';
+                statusEl.style.color = 'var(--success-color)';
+                setTimeout(() => {
+                    hideEditModal();
+                }, 1000);
+            } else {
+                statusEl.textContent = 'Error: Could not update officer.';
+                statusEl.style.color = 'var(--error-color)';
+            }
+        }
         
         // Form submission handler for Events (MODIFIED)
         function handleLogForm(event) {
@@ -1307,7 +1501,11 @@
         window.showLogForm = showLogForm; 
         window.hideLogForm = hideLogForm; 
         window.handleLogForm = handleLogForm; 
-        window.updateEventTypeFields = updateEventTypeFields; // New exposed function
+        window.updateEventTypeFields = updateEventTypeFields;
+        // --- NEW Exposed Functions ---
+        window.showEditModal = showEditModal;
+        window.hideEditModal = hideEditModal;
+        window.handleEditForm = handleEditForm;
 
         // Check for existing session on page load
         checkSession();
