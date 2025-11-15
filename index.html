@@ -8,33 +8,34 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        // Import updateDoc for editing
-        import { getFirestore, collection, onSnapshot, query, orderBy, serverTimestamp, addDoc, limit, doc, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        // Import updateDoc for editing and new functions for login query
+        import { getFirestore, collection, onSnapshot, query, orderBy, serverTimestamp, addDoc, limit, doc, deleteDoc, updateDoc, getDocs, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- MANDATORY FIREBASE ENVIRONMENT VARIABLES ---
         // These variables are injected by the Canvas platform for collaborative apps.
         const appId = "1:69804423705:web:f155e8eecfa34c8a4e0888"
         const firebaseConfig = {
-  apiKey: "AIzaSyALuA1aEeGCILi8aqI960Youp_0OdcZyRo",
-  authDomain: "fish-hicom-panel.firebaseapp.com",
-  projectId: "fish-hicom-panel",
-  storageBucket: "fish-hicom-panel.firebasestorage.app",
-  messagingSenderId: "69804423705",
-  appId: "1:69804423705:web:f155e8eecfa34c8a4e0888"
-};
+          apiKey: "AIzaSyALuA1aEeGCILi8aqI960Youp_0OdcZyRo",
+          authDomain: "fish-hicom-panel.firebaseapp.com",
+          projectId: "fish-hicom-panel",
+          storageBucket: "fish-hicom-panel.firebasestorage.app",
+          messagingSenderId: "69804423705",
+          appId: "1:69804423705:web:f155e8eecfa34c8a4e0888"
+        };
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
         let db, auth;
         let userId = null;
         let officerData = []; // Store officer data for event host dropdown
 
-        // Firebase Collection Paths (Using the mandated public path for shared data)
+        // Firebase Collection Paths
         const ANNOUNCEMENT_PATH = `announcements`; 
         const OFFICER_PATH = `officers`; 
         const EVENT_PATH = `events`; 
+        const LOGIN_PATH = `panel_logins`; // --- NEW --- Collection for panel logins
 
         // Function to set up Firebase services and authentication
-        function setupFirebase() {
+        async function setupFirebase() {
             try {
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
@@ -44,24 +45,25 @@
                     ? signInWithCustomToken(auth, initialAuthToken)
                     : signInAnonymously(auth);
 
-                signInPromise.then(() => {
-                    onAuthStateChanged(auth, (user) => {
-                        if (user) {
-                            userId = user.uid;
-                            window.currentUserId = userId; // Expose userId globally
-                            console.log(`Firebase Auth Complete. User ID: ${userId}`);
-                            // Load all necessary data when ready
-                            loadAnnouncements(); 
-                            loadOfficers(); 
-                            loadEvents(); 
-                        } else {
-                            console.log("User signed out or failed to authenticate.");
-                        }
-                    });
-                }).catch((error) => {
-                    console.error("Firebase Auth Failed:", error);
-                    const errorElement = document.getElementById('announcements-list');
-                    if(errorElement) errorElement.innerHTML = '<p class="text-center" style="color:red;">Error: Failed to connect to Command Database.</p>';
+                // Wait for sign-in to complete
+                await signInPromise;
+                
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        window.currentUserId = userId; // Expose userId globally
+                        console.log(`Firebase Auth Complete. User ID: ${userId}`);
+                        
+                        // --- NEW --- Seed database with initial logins ONCE
+                        await seedInitialLogins();
+                        
+                        // Load all necessary data when ready
+                        loadAnnouncements(); 
+                        loadOfficers(); 
+                        loadEvents(); 
+                    } else {
+                        console.log("User signed out or failed to authenticate.");
+                    }
                 });
 
             } catch (error) {
@@ -70,8 +72,206 @@
                 if(errorElement) errorElement.innerHTML = '<p class="text-center" style="color:red;">Error: Database setup failed.</p>';
             }
         }
+        
+        // --- NEW: LOGIN MANAGEMENT FUNCTIONS ---
 
-        // --- OFFICER MANAGEMENT FUNCTIONS ---
+        // Seed the database with the original hardcoded logins if it's empty
+        async function seedInitialLogins() {
+            if (!db) return;
+            try {
+                const loginsCollection = collection(db, LOGIN_PATH);
+                const snapshot = await getDocs(query(loginsCollection, limit(1)));
+                
+                // Only seed if the collection is empty
+                if (snapshot.empty) {
+                    console.log("Seeding initial panel logins...");
+                    const initialLogins = {
+                        "0breezedev": "Archon127&",
+                        "Fierce__Fish": "ViceAdmiral127&",
+                        "Lost_Player": "Admiral127&",
+                        "Gl1tch_4ce": "FleetAdmiral127&",
+                        "archon": "archon_pass_123" // Add archon as requested
+                    };
+                    
+                    for (const [username, password] of Object.entries(initialLogins)) {
+                        await addDoc(loginsCollection, {
+                            username: username,
+                            password: password, // Storing plaintext as per original app logic
+                            timestamp: serverTimestamp()
+                        });
+                    }
+                    console.log("Initial logins seeded successfully.");
+                }
+            } catch (e) {
+                console.error("Error seeding logins: ", e);
+            }
+        }
+
+        // Check credentials against Firestore
+        async function checkFirestoreLogin(username, password) {
+            if (!db) {
+                console.error("DB not initialized for login check.");
+                return false;
+            }
+            
+            try {
+                const q = query(collection(db, LOGIN_PATH), where("username", "==", username));
+                const querySnapshot = await getDocs(q);
+                
+                if (querySnapshot.empty) {
+                    console.log("Login failed: User not found.");
+                    return false; // User not found
+                }
+                
+                const userData = querySnapshot.docs[0].data();
+                
+                if (userData.password === password) {
+                    console.log("Login successful.");
+                    return true; // Password matches
+                } else {
+                    console.log("Login failed: Invalid password.");
+                    return false; // Invalid password
+                }
+            } catch (e) {
+                console.error("Error checking login: ", e);
+                return false;
+            }
+        }
+
+        // REAL-TIME LOGIN LIST LOADER (for Admin tab)
+        function loadLogins() {
+            const adminList = document.getElementById('admin-list');
+            
+            if (!db) {
+                console.error("DB is not initialized yet in loadLogins.");
+                adminList.innerHTML = '<p class="text-center" style="color:red;">Database connection error. Try refreshing.</p>';
+                return;
+            }
+
+            const loginsCollection = collection(db, LOGIN_PATH);
+            const q = query(loginsCollection, orderBy("timestamp", "desc")); 
+
+            onSnapshot(q, (snapshot) => {
+                adminList.innerHTML = '<div class="login-card header-row"><span>Username</span><span>Password</span><span>Action</span></div>';
+
+                if (snapshot.empty) {
+                    adminList.innerHTML += '<p class="text-center" style="grid-column: 1 / -1; margin-top: 15px;">No logins registered yet.</p>';
+                    return;
+                }
+                
+                snapshot.forEach((doc) => {
+                    const login = doc.data();
+                    const loginId = doc.id;
+                    
+                    const loginDiv = document.createElement('div');
+                    loginDiv.className = 'login-card';
+                    const safeUsername = login.username || 'N/A';
+                    // Mask password for display, though it's editable
+                    const safePassword = login.password ? '*********' : 'N/A';
+                    
+                    const escapedUsername = safeUsername.replace(/'/g, "\\'");
+                    // We pass the REAL password to the edit modal, not the masked one
+                    const escapedPassword = (login.password || '').replace(/'/g, "\\'");
+
+                    loginDiv.innerHTML = `
+                        <span class="username">${safeUsername}</span>
+                        <span class="rank">${safePassword}</span>
+                        <div class="action-buttons">
+                            <button class="edit-btn" onclick="window.showAdminEditModal('${loginId}', '${escapedUsername}', '${escapedPassword}')">Edit</button>
+                            <button class="delete-btn" onclick="window.deleteLogin('${loginId}')">X</button>
+                        </div>
+                    `;
+                    adminList.appendChild(loginDiv);
+                });
+
+            }, (error) => {
+                console.error("Error listening to logins:", error);
+                adminList.innerHTML = '<p class="text-center" style="color:red;">Failed to retrieve login list.</p>';
+            });
+        }
+
+        // ADD NEW LOGIN FUNCTION
+        async function registerNewLogin(username, password) {
+            if (!db) {
+                document.getElementById('admin-register-status').textContent = 'Error: Not connected to database.';
+                return;
+            }
+            document.getElementById('admin-register-status').textContent = 'Registering login...';
+
+            try {
+                await addDoc(collection(db, LOGIN_PATH), {
+                    username: username, 
+                    password: password,
+                    timestamp: serverTimestamp() 
+                });
+
+                document.getElementById('admin-register-status').textContent = 'Login registered successfully!';
+                
+                document.getElementById('admin-username-input').value = '';
+                document.getElementById('admin-password-input').value = '';
+                
+                setTimeout(() => {
+                    window.hideAdminRegisterForm(); 
+                }, 500); 
+
+            } catch (e) {
+                console.error("Error adding login: ", e);
+                document.getElementById('admin-register-status').textContent = `Error: Could not register login. ${e.message}`;
+            }
+        }
+
+        // DELETE LOGIN FUNCTION
+        async function deleteLogin(loginId) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return;
+            }
+            
+            // Prevent deleting the last login
+            const loginsCollection = collection(db, LOGIN_PATH);
+            const snapshot = await getDocs(loginsCollection);
+            if (snapshot.size <= 1) {
+                 // We can't use alert, so we'll show an error in the console
+                 console.error("Cannot delete the last login. You will be locked out.");
+                 // A better implementation would show this in a modal
+                 return;
+            }
+
+            const result = confirm("Are you sure you want to delete this panel login?");
+            if (result) {
+                try {
+                    const docRef = doc(db, LOGIN_PATH, loginId);
+                    await deleteDoc(docRef);
+                    console.log("Login deleted successfully:", loginId);
+                } catch (e) {
+                    console.error("Error deleting login: ", e);
+                }
+            }
+        }
+
+        // UPDATE LOGIN FUNCTION
+        async function updateLogin(loginId, newUsername, newPassword) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return false;
+            }
+            
+            try {
+                const docRef = doc(db, LOGIN_PATH, loginId);
+                await updateDoc(docRef, {
+                    username: newUsername,
+                    password: newPassword
+                });
+                console.log("Login updated successfully:", loginId);
+                return true;
+            } catch (e) {
+                console.error("Error updating login: ", e);
+                return false;
+            }
+        }
+
+
+        // --- OFFICER MANAGEMENT FUNCTIONS (Unchanged) ---
         
         // REAL-TIME OFFICER LOADER 
         function loadOfficers(forDropdown = false) {
@@ -84,18 +284,13 @@
             }
 
             const officersCollection = collection(db, OFFICER_PATH);
-            // Query to fetch officers, ordered by the time they were registered (newest first)
             const q = query(officersCollection, orderBy("timestamp", "desc")); 
 
-            // Real-time listener
             onSnapshot(q, (snapshot) => {
                 officerData = []; // Clear previous data
                 
-                // Only update the visual list if not called solely for dropdown data
                 if (!forDropdown) {
-                    // Updated header to include the Action column
                     officersList.innerHTML = '<div class="officer-card header-row"><span>Username</span><span>In-Game Rank</span><span>Action</span></div>';
-
                     if (snapshot.empty) {
                         officersList.innerHTML += '<p class="text-center" style="grid-column: 1 / -1; margin-top: 15px;">No officers registered yet.</p>';
                         return;
@@ -104,9 +299,7 @@
                 
                 snapshot.forEach((doc) => {
                     const officer = doc.data();
-                    const officerId = doc.id; // Get the document ID for deletion
-                    
-                    // Populate officerData array
+                    const officerId = doc.id;
                     officerData.push({ username: officer.username, rank: officer.rank });
 
                     if (!forDropdown) {
@@ -114,8 +307,6 @@
                         officerDiv.className = 'officer-card';
                         const safeUsername = officer.username || 'N/A';
                         const safeRank = officer.rank || 'N/A';
-                        
-                        // Use template literals for easier HTML string construction
                         const escapedUsername = safeUsername.replace(/'/g, "\\'");
                         const escapedRank = safeRank.replace(/'/g, "\\'");
 
@@ -131,7 +322,6 @@
                     }
                 });
                 
-                // If loaded for dropdown, ensure the dropdown is populated
                 if (forDropdown) {
                     populateOfficerDropdown();
                 }
@@ -151,26 +341,19 @@
             document.getElementById('register-status').textContent = 'Registering officer...';
 
             try {
-                // Add the new officer to the 'officers' collection
                 await addDoc(collection(db, OFFICER_PATH), {
                     username: username, 
                     rank: rank,
                     registeredBy: window.currentUsername || 'Unknown High Command',
                     timestamp: serverTimestamp() 
                 });
-
                 document.getElementById('register-status').textContent = 'Officer registered successfully! Returning to list view...';
-                
-                // Clear inputs
                 document.getElementById('officer-username-input').value = '';
                 document.getElementById('officer-rank-input').value = '';
-                
-                // Wait briefly for Firebase update before switching view
                 setTimeout(() => {
                     window.hideRegisterForm(); 
                     window.openTab('officers'); 
                 }, 500); 
-
             } catch (e) {
                 console.error("Error adding officer: ", e);
                 document.getElementById('register-status').textContent = `Error: Could not register officer. ${e.message}`;
@@ -183,10 +366,7 @@
                 console.error("DB is not initialized.");
                 return;
             }
-
-            // Using a simple modal approach for confirmation since alert() is forbidden
             const result = confirm("Are you sure you want to delete this officer from the roster?");
-
             if (result) {
                 try {
                     const docRef = doc(db, OFFICER_PATH, officerId);
@@ -198,13 +378,12 @@
             }
         }
 
-        // --- NEW --- UPDATE OFFICER FUNCTION
+        // UPDATE OFFICER FUNCTION
         async function updateOfficer(officerId, newUsername, newRank) {
             if (!db) {
                 console.error("DB is not initialized.");
                 return false;
             }
-            
             try {
                 const docRef = doc(db, OFFICER_PATH, officerId);
                 await updateDoc(docRef, {
@@ -219,69 +398,48 @@
             }
         }
         
-        // --- EVENT MANAGEMENT FUNCTIONS (UPDATED) ---
+        // --- EVENT MANAGEMENT FUNCTIONS (Unchanged) ---
 
-        // Helper function to calculate the start and end of the event week (Sunday to Saturday)
         function getEventWeekStartAndEnd(date) {
             const d = new Date(date);
             d.setHours(0, 0, 0, 0);
-
-            // Calculate the current day of the week (0 = Sunday, 6 = Saturday)
             const dayOfWeek = d.getDay();
-
-            // Calculate the date for Sunday (the start of the week)
             const sunday = new Date(d);
             sunday.setDate(d.getDate() - dayOfWeek);
-
-            // Calculate the date for Saturday (the end of the week)
             const saturday = new Date(sunday);
             saturday.setDate(sunday.getDate() + 6);
-            saturday.setHours(23, 59, 59, 999); // Set to the end of the day
-
+            saturday.setHours(23, 59, 59, 999); 
             return { sunday, saturday };
         }
 
-        // REAL-TIME EVENT LOADER (CLEANED UP DISPLAY)
         function loadEvents() {
             const eventsList = document.getElementById('events-list');
-            
             if (!db) {
                 console.error("DB is not initialized yet in loadEvents.");
                 eventsList.innerHTML = '<p class="text-center" style="color:red;">Database connection error. Try refreshing.</p>';
                 return;
             }
-            
-            // Populate officer dropdown
             populateOfficerDropdown();
-
             const eventsCollection = collection(db, EVENT_PATH);
-            // Query to fetch events, ordered by timestamp (newest first)
             const q = query(eventsCollection, orderBy("timestamp", "desc")); 
 
             onSnapshot(q, (snapshot) => {
                 const eventsByWeek = {};
-
                 if (snapshot.empty) {
                     eventsList.innerHTML = '<p class="text-center">No events have been logged yet.</p>';
                     return;
                 }
-                
                 snapshot.forEach((doc) => {
                     const event = doc.data();
                     const eventDate = event.timestamp ? event.timestamp.toDate() : new Date();
                     const eventId = doc.id;
-
                     const { sunday, saturday } = getEventWeekStartAndEnd(eventDate);
                     const weekKey = `${sunday.toLocaleDateString()} - ${saturday.toLocaleDateString()}`;
-
                     if (!eventsByWeek[weekKey]) {
                         eventsByWeek[weekKey] = [];
                     }
-                    
                     eventsByWeek[weekKey].push({ ...event, id: eventId, date: eventDate });
                 });
-
-                // Clear and render the events list
                 eventsList.innerHTML = '';
                 for (const weekKey in eventsByWeek) {
                     const weekHeader = document.createElement('h4');
@@ -294,20 +452,17 @@
                         eventDiv.className = 'event-card';
                         const timestamp = event.date.toLocaleString();
                         
-                        // Determine the main detail to display and set color
                         let mainDetail = '';
                         if (event.eventType === 'Event' && event.eventSubType) {
                             mainDetail = `Activity: ${event.eventSubType}`;
-                            eventDiv.style.borderLeftColor = 'var(--accent-color)'; // Blue for standard Events
+                            eventDiv.style.borderLeftColor = 'var(--accent-color)';
                         } else if (event.eventType === 'Training' && event.mapName) {
                             mainDetail = `Map: ${event.mapName}`;
-                            eventDiv.style.borderLeftColor = 'var(--error-color)'; // Red for Trainings
+                            eventDiv.style.borderLeftColor = 'var(--error-color)';
                         } else {
                             mainDetail = 'No specific detail recorded';
                             eventDiv.style.borderLeftColor = '#999';
                         }
-
-                        // Cleaned up, clearer display structure
                         eventDiv.innerHTML = `
                             <div class="event-header">
                                 <span class="host-info">
@@ -323,22 +478,18 @@
                         eventsList.appendChild(eventDiv);
                     });
                 }
-
             }, (error) => {
                 console.error("Error listening to events:", error);
                 eventsList.innerHTML = '<p class="text-center" style="color:red;">Failed to retrieve events list.</p>';
             });
         }
         
-        // NEW EVENT LOGGER (MODIFIED DATA STRUCTURE)
         async function logNewEvent(hostUsername, hostRank, eventType, eventDetail) {
             if (!db) {
                 document.getElementById('log-status').textContent = 'Error: Not connected to database.';
                 return;
             }
             document.getElementById('log-status').textContent = 'Logging event...';
-            
-            // Conditional data structure
             const data = {
                 hostUsername: hostUsername, 
                 hostRank: hostRank,
@@ -346,39 +497,30 @@
                 loggedBy: window.currentUsername || 'Unknown High Command',
                 timestamp: serverTimestamp() 
             };
-            
             if (eventType === 'Event') {
                 data.eventSubType = eventDetail;
             } else if (eventType === 'Training') {
                 data.mapName = eventDetail;
             }
-            
             try {
                 await addDoc(collection(db, EVENT_PATH), data);
-
                 document.getElementById('log-status').textContent = 'Event logged successfully! Returning to list view...';
-                
-                // Wait briefly for Firebase update before switching view
                 setTimeout(() => {
                     window.hideLogForm(); 
                     window.openTab('events'); 
                 }, 500); 
-
             } catch (e) {
                 console.error("Error adding event: ", e);
                 document.getElementById('log-status').textContent = `Error: Could not log event. ${e.message}`;
             }
         }
         
-        // DELETE EVENT FUNCTION
         async function deleteEvent(eventId) {
             if (!db) {
                 console.error("DB is not initialized.");
                 return;
             }
-
             const result = confirm("Are you sure you want to delete this event log?");
-
             if (result) {
                 try {
                     const docRef = doc(db, EVENT_PATH, eventId);
@@ -390,16 +532,13 @@
             }
         }
         
-        // Populate the Host dropdown in the event log form
         function populateOfficerDropdown() {
             const dropdown = document.getElementById('event-host-select');
             dropdown.innerHTML = '<option value="" disabled selected>Select Event Host</option>'; 
-            
-            // Check if officerData is available
             if (officerData && officerData.length > 0) {
                 officerData.forEach(officer => {
                     const option = document.createElement('option');
-                    option.value = `${officer.username}|${officer.rank}`; // Combine for easy parsing
+                    option.value = `${officer.username}|${officer.rank}`;
                     option.textContent = `${officer.username} (${officer.rank})`;
                     dropdown.appendChild(option);
                 });
@@ -413,31 +552,25 @@
         }
 
 
-        // --- ANNOUNCEMENT MANAGEMENT FUNCTIONS (PRESERVED) ---
+        // --- ANNOUNCEMENT MANAGEMENT FUNCTIONS (Unchanged) ---
 
-        // REAL-TIME ANNOUNCEMENT LOADER (Original)
         function loadAnnouncements() {
             if (!db) {
                 console.error("DB is not initialized yet in loadAnnouncements.");
                 return;
             }
-
             const announcementsCollection = collection(db, ANNOUNCEMENT_PATH);
             const q = query(announcementsCollection, orderBy("timestamp", "desc"), limit(20));
-
             onSnapshot(q, (snapshot) => {
                 const announcementsList = document.getElementById('announcements-list');
                 announcementsList.innerHTML = ''; 
-                
                 if (snapshot.empty) {
                     announcementsList.innerHTML = '<p class="text-center">No announcements have been made yet.</p>';
                     return;
                 }
-
                 snapshot.forEach((doc) => {
                     const data = doc.data();
                     const timestamp = data.timestamp ? new Date(data.timestamp.toDate()).toLocaleString() : 'N/A';
-                    
                     const announcementDiv = document.createElement('div');
                     announcementDiv.className = 'announcement-card';
                     announcementDiv.innerHTML = `
@@ -448,7 +581,7 @@
                         <p class="content">${data.content}</p>
                         <span class="rank-indicator">${data.senderRank || 'High Command'}</span>
                     `;
-                    announcementDiv.style.borderColor = data.senderRank === 'Fleet Admiral' ? 'var(--accent-color)' : '#ddd'; // Added conditional styling
+                    announcementDiv.style.borderColor = data.senderRank === 'Fleet Admiral' ? 'var(--accent-color)' : '#ddd';
                     announcementsList.appendChild(announcementDiv);
                 });
             }, (error) => {
@@ -458,10 +591,8 @@
             });
         }
 
-        // ANNOUNCEMENT POSTER (Original)
         async function postAnnouncement(content) {
             const user = window.currentUsername; 
-
             if (!db || !user) {
                 document.getElementById('post-status').textContent = 'Error: Not connected to database or user not logged in.';
                 return;
@@ -469,12 +600,14 @@
             document.getElementById('post-status').textContent = 'Posting announcement...';
 
             try {
+                // Rank logic is now less critical as auth is separate,
+                // but we keep it for display consistency.
                 let rank = 'High Command';
-                // Rank logic based on logged-in username (from the validAccounts list)
                 if (user === '0breezedev') rank = 'Archon'; 
                 else if (user === 'Fierce__Fish') rank = 'Vice Admiral'; 
                 else if (user === 'Lost_Player') rank = 'Admiral'; 
                 else if (user === 'Gl1tch_4ce') rank = 'Fleet Admiral'; 
+                else if (user === 'archon') rank = 'Archon';
 
                 await addDoc(collection(db, ANNOUNCEMENT_PATH), {
                     content: content,
@@ -502,11 +635,18 @@
         window.postAnnouncement = postAnnouncement;
         window.registerNewOfficer = registerNewOfficer; 
         window.deleteOfficer = deleteOfficer; 
-        window.updateOfficer = updateOfficer; // <-- NEW
+        window.updateOfficer = updateOfficer; 
         window.loadOfficers = loadOfficers; 
         window.logNewEvent = logNewEvent; 
         window.deleteEvent = deleteEvent; 
         window.loadEvents = loadEvents; 
+        
+        // --- NEW Exposed Login Functions ---
+        window.checkFirestoreLogin = checkFirestoreLogin;
+        window.loadLogins = loadLogins;
+        window.registerNewLogin = registerNewLogin;
+        window.deleteLogin = deleteLogin;
+        window.updateLogin = updateLogin;
     </script>
     
     <style>
@@ -771,7 +911,6 @@
         }
         .officer-card {
             display: grid;
-            /* Updated grid to fit edit/delete buttons */
             grid-template-columns: 2fr 1.5fr 110px; 
             align-items: center;
             padding: 10px;
@@ -789,21 +928,56 @@
             padding: 10px 15px;
             margin-bottom: 10px;
             border-bottom: none;
-            /* Ensure header matches content grid */
             grid-template-columns: 2fr 1.5fr 110px; 
         }
         .officer-card:last-of-type {
             border-bottom: none;
         }
-        /* Officer Registration Form Styles */
-        #officer-register-form {
+        
+        /* --- NEW: Panel Login List Styles (Copied from Officer) --- */
+        #admin-list {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+        .login-card {
+            display: grid;
+            grid-template-columns: 2fr 1.5fr 110px; 
+            align-items: center;
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 5px;
+            border-bottom: 1px solid #eee;
+            font-size: 1.1em;
+            text-align: left;
+        }
+        .login-card.header-row {
+            font-weight: bold;
+            background-color: var(--navy-blue);
+            color: white;
+            border-radius: 5px 5px 0 0;
+            padding: 10px 15px;
+            margin-bottom: 10px;
+            border-bottom: none;
+            grid-template-columns: 2fr 1.5fr 110px; 
+        }
+        .login-card:last-of-type {
+            border-bottom: none;
+        }
+        
+        /* Officer/Admin Registration Form Styles */
+        #officer-register-form, #admin-register-form {
             padding: 20px;
             border: 1px solid #ccc;
             border-radius: 8px;
             background-color: #fff;
             margin-top: 20px;
         }
-        #register-status {
+        #register-status, #admin-register-status {
             margin-top: 15px;
             font-weight: bold;
             color: var(--success-color);
@@ -849,7 +1023,7 @@
         }
 
 
-        /* NEW Event List Styles (CLEANED UP) */
+        /* Event List Styles */
         #events-list {
             display: flex;
             flex-direction: column;
@@ -867,7 +1041,6 @@
         .event-card {
             background-color: #ffffff;
             border: 1px solid #ddd;
-            /* Border-left color is set dynamically by JS for Event/Training */
             border-left: 5px solid var(--success-color); 
             border-radius: 8px;
             padding: 15px;
@@ -927,7 +1100,7 @@
             text-align: center;
         }
 
-        /* --- NEW: Officer Edit Modal Styles --- */
+        /* Modal Styles */
         .modal-overlay {
             display: none; /* Hidden by default */
             position: fixed;
@@ -973,7 +1146,7 @@
         .modal-buttons .cancel-btn:hover {
             background-color: #5a6268;
         }
-        #edit-status {
+        #edit-status, #admin-edit-status {
             text-align: center;
             color: var(--error-color);
             font-weight: bold;
@@ -1016,6 +1189,8 @@
             <button id="tab-announcements" class="tab-button" onclick="openTab('announcements')">Announcements</button>
             <button id="tab-officers" class="tab-button" onclick="openTab('officers')">Officers</button> 
             <button id="tab-events" class="tab-button" onclick="openTab('events')">Events</button> 
+            <!-- --- NEW --- Admin tab, hidden by default -->
+            <button id="tab-admin" class="tab-button" onclick="openTab('admin')" style="display: none;">Admin</button>
         </div>
 
         <div id="home" class="tab-content">
@@ -1076,7 +1251,6 @@
                         <label for="officer-username-input">Officer Username</label>
                         <input type="text" id="officer-username-input" placeholder="Enter Roblox/In-Game Username" required>
                     </div>
-                    <!-- === MODIFICATION START === -->
                     <div class="input-group">
                         <label for="officer-rank-input">Current Rank In Game</label>
                         <select id="officer-rank-input" required>
@@ -1096,7 +1270,6 @@
                             <option value="Fleet Admiral">Fleet Admiral</option>
                         </select>
                     </div>
-                    <!-- === MODIFICATION END === -->
                     <button type="submit">Register Officer</button>
                 </form>
                 <p id="register-status"></p>
@@ -1142,14 +1315,43 @@
             </div>
 
         </div>
+        
+        <!-- --- NEW --- Admin Tab Content -->
+        <div id="admin" class="tab-content" style="display: none;">
+            
+            <div id="admin-view-area">
+                <h3 class="text-center">Manage Panel Logins</h3>
+                <div id="admin-list">
+                    <p class="text-center">Loading logins...</p>
+                </div>
+                <button onclick="showAdminRegisterForm()" style="margin-top: 20px; max-width: 300px; float: right;">Add New Login</button>
+            </div>
+            
+            <div id="admin-register-form" style="display: none;">
+                <h3>Add New Panel Login</h3>
+                <form id="adminRegisterForm" onsubmit="handleAdminRegisterForm(event)">
+                    <div class="input-group">
+                        <label for="admin-username-input">Username</label>
+                        <input type="text" id="admin-username-input" placeholder="Enter new username" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="admin-password-input">Password</label>
+                        <input type="text" id="admin-password-input" placeholder="Enter new password" required>
+                    </div>
+                    <button type="submit">Add Login</button>
+                </form>
+                <p id="admin-register-status"></p>
+                <button class="panel-header button" style="background-color: #6c757d; margin-top: 10px; max-width: 150px;" onclick="hideAdminRegisterForm()">Cancel</button>
+            </div>
+
+        </div>
     </div>
 
-    <!-- --- NEW: Officer Edit Modal --- -->
+    <!-- Officer Edit Modal (Unchanged) -->
     <div id="edit-officer-modal" class="modal-overlay">
         <div class="modal-content">
             <h3>Edit Officer Details</h3>
             <form id="edit-officer-form" onsubmit="handleEditForm(event)">
-                <!-- Hidden input to store the document ID -->
                 <input type="hidden" id="edit-officer-id">
                 
                 <div class="input-group">
@@ -1186,27 +1388,66 @@
             </form>
         </div>
     </div>
+    
+    <!-- --- NEW --- Admin Edit Modal -->
+    <div id="edit-admin-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Edit Panel Login</h3>
+            <form id="edit-admin-form" onsubmit="handleAdminEditForm(event)">
+                <input type="hidden" id="edit-admin-id">
+                
+                <div class="input-group">
+                    <label for="edit-admin-username">Username</label>
+                    <input type="text" id="edit-admin-username" required>
+                </div>
+                
+                <div class="input-group">
+                    <label for="edit-admin-password">Password</label>
+                    <!-- Using type="text" to allow editing, as password type fields don't show current value -->
+                    <input type="text" id="edit-admin-password" required>
+                </div>
+                
+                <p id="admin-edit-status"></p>
+
+                <div class="modal-buttons">
+                    <button type="button" class="cancel-btn" onclick="hideAdminEditModal()">Cancel</button>
+                    <button type="submit" style="background-color: var(--success-color);">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
 
     <script type="module">
         // Import functions exposed globally in the first script tag
-        const { postAnnouncement, setupFirebase, registerNewOfficer, deleteOfficer, updateOfficer, loadOfficers, logNewEvent, deleteEvent, loadEvents } = window;
+        const { 
+            postAnnouncement, 
+            setupFirebase, 
+            registerNewOfficer, 
+            deleteOfficer, 
+            updateOfficer, 
+            loadOfficers, 
+            logNewEvent, 
+            deleteEvent, 
+            loadEvents,
+            // --- NEW ---
+            checkFirestoreLogin,
+            loadLogins,
+            registerNewLogin,
+            deleteLogin,
+            updateLogin
+        } = window;
         
-        // NOTE: Keeping the session management local for simple demo login
         const SESSION_KEY = "fishLegionHCUser";
 
-        const validAccounts = {
-            "0breezedev": "Archon127&",
-            "Fierce__Fish": "ViceAdmiral127&",
-            "Lost_Player": "Admiral127&",
-            "Gl1tch_4ce": "FleetAdmiral127&",
-        };
+        // --- DEPRECATED --- The validAccounts object is no longer used for login
+        // const validAccounts = { ... };
 
         let activeUser = null; 
         
-        // --- LOGIN & SESSION MANAGEMENT ---
+        // --- LOGIN & SESSION MANAGEMENT (UPDATED) ---
 
-        document.getElementById('loginForm').addEventListener('submit', function(event) {
+        document.getElementById('loginForm').addEventListener('submit', async function(event) {
             event.preventDefault(); 
 
             const usernameInput = document.getElementById('username');
@@ -1216,18 +1457,15 @@
             const username = usernameInput.value.trim();
             const password = passwordInput.value;
 
-            errorMessage.textContent = '';
+            errorMessage.textContent = 'Checking credentials...';
             
-            let isAuthenticated = false;
-            
-            if (validAccounts[username] === password) {
-                isAuthenticated = true;
-            }
+            // --- UPDATED --- Check against Firestore
+            const isAuthenticated = await window.checkFirestoreLogin(username, password);
             
             if (isAuthenticated) {
                 localStorage.setItem(SESSION_KEY, username);
                 completeLogin(username);
-                
+                errorMessage.textContent = '';
             } else {
                 errorMessage.textContent = 'Invalid Username or Password. Access Denied.';
             }
@@ -1247,6 +1485,15 @@
             activeUser = username; 
             window.currentUsername = username; 
             
+            // --- NEW --- Show/Hide Admin Tab based on logged-in user
+            const adminTab = document.getElementById('tab-admin');
+            if (username === '0breezedev' || username === 'archon') {
+                adminTab.style.display = 'block';
+            } else {
+                adminTab.style.display = 'none';
+            }
+            // --- END NEW ---
+            
             // Set the initial active tab
             openTab('home');
         }
@@ -1256,12 +1503,18 @@
             document.getElementById('main-panel').style.display = 'none';
             document.getElementById('login-box').style.display = 'block';
             document.getElementById('error-message').textContent = '';
+            
+            // --- NEW --- Hide admin tab on logout
+            document.getElementById('tab-admin').style.display = 'none';
+            
             activeUser = null; 
         }
 
         function checkSession() {
             const savedUser = localStorage.getItem(SESSION_KEY);
-            if (savedUser && validAccounts[savedUser]) {
+            // --- UPDATED --- No password check, just trust the session
+            // If the user exists in session, log them in.
+            if (savedUser) {
                 completeLogin(savedUser);
             }
         }
@@ -1283,27 +1536,24 @@
             document.getElementById(tabName).style.display = "block";
             document.getElementById(`tab-${tabName}`).classList.add("active");
             
-            // Manage sub-views and data loading when switching tabs
-            if (tabName === 'announcements') {
-                hideRegisterForm(true); 
-                hidePostForm(true);
-                hideLogForm(true);
-            }
+            // Manage sub-views and data loading
+            hidePostForm(true);
+            hideRegisterForm(true); 
+            hideLogForm(true);
+            hideAdminRegisterForm(true); // --- NEW ---
+            
             if (tabName === 'officers') {
-                hidePostForm(true); 
-                hideRegisterForm(true);
-                hideLogForm(true);
-                window.loadOfficers(); // Reload the officer list when the tab is opened
+                window.loadOfficers(); 
             }
             if (tabName === 'events') { 
-                hidePostForm(true); 
-                hideRegisterForm(true);
-                hideLogForm(true);
-                window.loadEvents(); // Reload the event list when the tab is opened
+                window.loadEvents(); 
+            }
+            if (tabName === 'admin') { // --- NEW ---
+                window.loadLogins();
             }
         }
         
-        // Functions for switching between announcement views
+        // Announcement views
         function showPostForm() {
             openTab('announcements');
             document.getElementById('announcement-view-area').style.display = 'none';
@@ -1319,9 +1569,9 @@
             }
         }
 
-        // Functions for switching between officer views
+        // Officer views
         function showRegisterForm() {
-            openTab('officers'); // Ensure the officers tab is open
+            openTab('officers'); 
             document.getElementById('officer-view-area').style.display = 'none';
             document.getElementById('officer-register-form').style.display = 'block';
             document.getElementById('register-status').textContent = '';
@@ -1336,14 +1586,12 @@
             }
         }
         
-        // Functions for switching between event views (MODIFIED)
+        // Event views
         function showLogForm() {
             openTab('events'); 
             document.getElementById('event-view-area').style.display = 'none';
             document.getElementById('event-log-form').style.display = 'block';
             document.getElementById('log-status').textContent = '';
-            
-            // Load officers for dropdown and initialize conditional fields
             window.loadOfficers(true); 
             updateEventTypeFields();
         }
@@ -1354,8 +1602,25 @@
                 document.getElementById('event-view-area').style.display = 'block';
             }
         }
+        
+        // --- NEW --- Admin views
+        function showAdminRegisterForm() {
+            openTab('admin'); 
+            document.getElementById('admin-view-area').style.display = 'none';
+            document.getElementById('admin-register-form').style.display = 'block';
+            document.getElementById('admin-register-status').textContent = '';
+            document.getElementById('admin-username-input').value = '';
+            document.getElementById('admin-password-input').value = '';
+        }
 
-        // --- NEW: Modal Control Functions ---
+        function hideAdminRegisterForm(force = false) {
+            if (document.getElementById('admin').style.display === 'block' || force) {
+                document.getElementById('admin-register-form').style.display = 'none';
+                document.getElementById('admin-view-area').style.display = 'block';
+            }
+        }
+
+        // Modal Control Functions
         function showEditModal(officerId, currentUsername, currentRank) {
             const modal = document.getElementById('edit-officer-modal');
             document.getElementById('edit-officer-id').value = officerId;
@@ -1369,17 +1634,29 @@
             const modal = document.getElementById('edit-officer-modal');
             modal.style.display = 'none';
         }
+        
+        // --- NEW --- Admin Modal Control
+        function showAdminEditModal(loginId, currentUsername, currentPassword) {
+            const modal = document.getElementById('edit-admin-modal');
+            document.getElementById('edit-admin-id').value = loginId;
+            document.getElementById('edit-admin-username').value = currentUsername;
+            document.getElementById('edit-admin-password').value = currentPassword;
+            document.getElementById('admin-edit-status').textContent = '';
+            modal.style.display = 'flex';
+        }
 
-        // NEW FUNCTION: Handles conditional display of event/training fields
+        function hideAdminEditModal() {
+            const modal = document.getElementById('edit-admin-modal');
+            modal.style.display = 'none';
+        }
+
+        // Event Type conditional fields
         function updateEventTypeFields() {
             const typeSelect = document.getElementById('event-type-select');
             const fieldsContainer = document.getElementById('conditional-event-fields');
             const selectedType = typeSelect.value;
-            
-            fieldsContainer.innerHTML = ''; // Clear previous content
-
+            fieldsContainer.innerHTML = ''; 
             let htmlContent = '';
-
             if (selectedType === 'Event') {
                 htmlContent = `
                     <div class="input-group">
@@ -1401,7 +1678,6 @@
                     </div>
                 `;
             }
-            
             fieldsContainer.innerHTML = htmlContent;
         }
 
@@ -1419,7 +1695,6 @@
             event.preventDefault();
             const username = document.getElementById('officer-username-input').value.trim();
             const rank = document.getElementById('officer-rank-input').value.trim();
-
             if (username.length > 0 && rank.length > 0 && window.registerNewOfficer) {
                 window.registerNewOfficer(username, rank);
             } else {
@@ -1427,24 +1702,20 @@
             }
         }
 
-        // --- NEW: Form submission handler for Edit Officer Modal ---
+        // Form submission handler for Edit Officer Modal
         async function handleEditForm(event) {
             event.preventDefault();
             const officerId = document.getElementById('edit-officer-id').value;
             const newUsername = document.getElementById('edit-officer-username').value.trim();
             const newRank = document.getElementById('edit-officer-rank').value;
             const statusEl = document.getElementById('edit-status');
-
             if (!officerId || !newUsername || !newRank) {
                 statusEl.textContent = 'Error: All fields are required.';
                 return;
             }
-
             statusEl.textContent = 'Saving...';
             statusEl.style.color = 'var(--navy-blue)';
-
             const success = await window.updateOfficer(officerId, newUsername, newRank);
-
             if (success) {
                 statusEl.textContent = 'Officer updated successfully!';
                 statusEl.style.color = 'var(--success-color)';
@@ -1457,35 +1728,66 @@
             }
         }
         
-        // Form submission handler for Events (MODIFIED)
+        // Form submission handler for Events
         function handleLogForm(event) {
             event.preventDefault();
             const hostSelect = document.getElementById('event-host-select');
             const eventType = document.getElementById('event-type-select').value;
             const detailInput = document.getElementById('event-detail-input'); 
             const logStatus = document.getElementById('log-status');
-            
             if (!detailInput) {
                 logStatus.textContent = 'Error: Event detail field is missing.';
                 return;
             }
-
             const eventDetail = detailInput.value.trim();
-            
             const selectedHost = hostSelect.value;
             if (!selectedHost) {
                 logStatus.textContent = 'Error: Please select an Event Host.';
                 return;
             }
-            
-            // Split the combined value into username and rank
             const [hostUsername, hostRank] = selectedHost.split('|');
-
             if (hostUsername.length > 0 && hostRank.length > 0 && eventType.length > 0 && eventDetail.length > 0 && window.logNewEvent) {
-                // Pass the specific detail
                 window.logNewEvent(hostUsername, hostRank, eventType, eventDetail);
             } else {
                  logStatus.textContent = 'Error: Please fill all required fields.';
+            }
+        }
+        
+        // --- NEW --- Form submission handler for Admin Register
+        function handleAdminRegisterForm(event) {
+            event.preventDefault();
+            const username = document.getElementById('admin-username-input').value.trim();
+            const password = document.getElementById('admin-password-input').value.trim();
+            if (username.length > 0 && password.length > 0 && window.registerNewLogin) {
+                window.registerNewLogin(username, password);
+            } else {
+                 document.getElementById('admin-register-status').textContent = 'Error: Please fill both fields.';
+            }
+        }
+        
+        // --- NEW --- Form submission handler for Admin Edit Modal
+        async function handleAdminEditForm(event) {
+            event.preventDefault();
+            const loginId = document.getElementById('edit-admin-id').value;
+            const newUsername = document.getElementById('edit-admin-username').value.trim();
+            const newPassword = document.getElementById('edit-admin-password').value.trim();
+            const statusEl = document.getElementById('admin-edit-status');
+            if (!loginId || !newUsername || !newPassword) {
+                statusEl.textContent = 'Error: All fields are required.';
+                return;
+            }
+            statusEl.textContent = 'Saving...';
+            statusEl.style.color = 'var(--navy-blue)';
+            const success = await window.updateLogin(loginId, newUsername, newPassword);
+            if (success) {
+                statusEl.textContent = 'Login updated successfully!';
+                statusEl.style.color = 'var(--success-color)';
+                setTimeout(() => {
+                    hideAdminEditModal();
+                }, 1000);
+            } else {
+                statusEl.textContent = 'Error: Could not update login.';
+                statusEl.style.color = 'var(--error-color)';
             }
         }
 
@@ -1502,10 +1804,17 @@
         window.hideLogForm = hideLogForm; 
         window.handleLogForm = handleLogForm; 
         window.updateEventTypeFields = updateEventTypeFields;
-        // --- NEW Exposed Functions ---
         window.showEditModal = showEditModal;
         window.hideEditModal = hideEditModal;
         window.handleEditForm = handleEditForm;
+        
+        // --- NEW Exposed Functions ---
+        window.showAdminRegisterForm = showAdminRegisterForm;
+        window.hideAdminRegisterForm = hideAdminRegisterForm;
+        window.handleAdminRegisterForm = handleAdminRegisterForm;
+        window.showAdminEditModal = showAdminEditModal;
+        window.hideAdminEditModal = hideAdminEditModal;
+        window.handleAdminEditForm = handleAdminEditForm;
 
         // Check for existing session on page load
         checkSession();
