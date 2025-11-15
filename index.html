@@ -32,7 +32,8 @@
         const ANNOUNCEMENT_PATH = `announcements`; 
         const OFFICER_PATH = `officers`; 
         const EVENT_PATH = `events`; 
-        const LOGIN_PATH = `panel_logins`; // --- NEW --- Collection for panel logins
+        const RECRUITMENT_PATH = `recruitments`; // --- NEW ---
+        const LOGIN_PATH = `panel_logins`; 
 
         // Function to set up Firebase services and authentication
         async function setupFirebase() {
@@ -54,13 +55,13 @@
                         window.currentUserId = userId; // Expose userId globally
                         console.log(`Firebase Auth Complete. User ID: ${userId}`);
                         
-                        // --- NEW --- Seed database with initial logins ONCE
                         await seedInitialLogins();
                         
                         // Load all necessary data when ready
                         loadAnnouncements(); 
                         loadOfficers(); 
                         loadEvents(); 
+                        loadRecruitments(); // --- NEW ---
                     } else {
                         console.log("User signed out or failed to authenticate.");
                     }
@@ -73,7 +74,7 @@
             }
         }
         
-        // --- NEW: LOGIN MANAGEMENT FUNCTIONS ---
+        // --- LOGIN MANAGEMENT FUNCTIONS ---
 
         // Seed the database with the original hardcoded logins if it's empty
         async function seedInitialLogins() {
@@ -82,7 +83,6 @@
                 const loginsCollection = collection(db, LOGIN_PATH);
                 const snapshot = await getDocs(query(loginsCollection, limit(1)));
                 
-                // Only seed if the collection is empty
                 if (snapshot.empty) {
                     console.log("Seeding initial panel logins...");
                     const initialLogins = {
@@ -90,13 +90,13 @@
                         "Fierce__Fish": "ViceAdmiral127&",
                         "Lost_Player": "Admiral127&",
                         "Gl1tch_4ce": "FleetAdmiral127&",
-                        "archon": "archon_pass_123" // Add archon as requested
+                        "archon": "archon_pass_123" 
                     };
                     
                     for (const [username, password] of Object.entries(initialLogins)) {
                         await addDoc(loginsCollection, {
                             username: username,
-                            password: password, // Storing plaintext as per original app logic
+                            password: password, 
                             timestamp: serverTimestamp()
                         });
                     }
@@ -120,17 +120,17 @@
                 
                 if (querySnapshot.empty) {
                     console.log("Login failed: User not found.");
-                    return false; // User not found
+                    return false; 
                 }
                 
                 const userData = querySnapshot.docs[0].data();
                 
                 if (userData.password === password) {
                     console.log("Login successful.");
-                    return true; // Password matches
+                    return true; 
                 } else {
                     console.log("Login failed: Invalid password.");
-                    return false; // Invalid password
+                    return false; 
                 }
             } catch (e) {
                 console.error("Error checking login: ", e);
@@ -166,11 +166,9 @@
                     const loginDiv = document.createElement('div');
                     loginDiv.className = 'login-card';
                     const safeUsername = login.username || 'N/A';
-                    // Mask password for display, though it's editable
                     const safePassword = login.password ? '*********' : 'N/A';
                     
                     const escapedUsername = safeUsername.replace(/'/g, "\\'");
-                    // We pass the REAL password to the edit modal, not the masked one
                     const escapedPassword = (login.password || '').replace(/'/g, "\\'");
 
                     loginDiv.innerHTML = `
@@ -227,13 +225,10 @@
                 return;
             }
             
-            // Prevent deleting the last login
             const loginsCollection = collection(db, LOGIN_PATH);
             const snapshot = await getDocs(loginsCollection);
             if (snapshot.size <= 1) {
-                 // We can't use alert, so we'll show an error in the console
                  console.error("Cannot delete the last login. You will be locked out.");
-                 // A better implementation would show this in a modal
                  return;
             }
 
@@ -287,7 +282,7 @@
             const q = query(officersCollection, orderBy("timestamp", "desc")); 
 
             onSnapshot(q, (snapshot) => {
-                officerData = []; // Clear previous data
+                officerData = []; 
                 
                 if (!forDropdown) {
                     officersList.innerHTML = '<div class="officer-card header-row"><span>Username</span><span>In-Game Rank</span><span>Action</span></div>';
@@ -441,13 +436,19 @@
                     eventsByWeek[weekKey].push({ ...event, id: eventId, date: eventDate });
                 });
                 eventsList.innerHTML = '';
-                for (const weekKey in eventsByWeek) {
+                // Get sorted keys
+                const sortedWeekKeys = Object.keys(eventsByWeek).sort((a, b) => new Date(b.split(' - ')[0]) - new Date(a.split(' - ')[0]));
+
+                for (const weekKey of sortedWeekKeys) {
                     const weekHeader = document.createElement('h4');
                     weekHeader.className = 'week-header';
                     weekHeader.textContent = `Week: ${weekKey}`;
                     eventsList.appendChild(weekHeader);
                     
-                    eventsByWeek[weekKey].forEach(event => {
+                    // Sort events within the week
+                    const sortedEvents = eventsByWeek[weekKey].sort((a, b) => b.date - a.date);
+
+                    sortedEvents.forEach(event => {
                         const eventDiv = document.createElement('div');
                         eventDiv.className = 'event-card';
                         const timestamp = event.date.toLocaleString();
@@ -536,7 +537,9 @@
             const dropdown = document.getElementById('event-host-select');
             dropdown.innerHTML = '<option value="" disabled selected>Select Event Host</option>'; 
             if (officerData && officerData.length > 0) {
-                officerData.forEach(officer => {
+                // Sort officers alphabetically
+                const sortedOfficers = [...officerData].sort((a, b) => a.username.localeCompare(b.username));
+                sortedOfficers.forEach(officer => {
                     const option = document.createElement('option');
                     option.value = `${officer.username}|${officer.rank}`;
                     option.textContent = `${officer.username} (${officer.rank})`;
@@ -548,6 +551,137 @@
                 option.textContent = 'No officers registered.';
                 option.disabled = true;
                 dropdown.appendChild(option);
+            }
+        }
+
+        
+        // --- NEW: RECRUITMENT MANAGEMENT FUNCTIONS ---
+
+        function loadRecruitments() {
+            const recruitmentsList = document.getElementById('recruitments-list');
+            if (!db) {
+                console.error("DB is not initialized yet in loadRecruitments.");
+                recruitmentsList.innerHTML = '<p class="text-center" style="color:red;">Database connection error. Try refreshing.</p>';
+                return;
+            }
+            const recruitmentsCollection = collection(db, RECRUITMENT_PATH);
+            const q = query(recruitmentsCollection, orderBy("timestamp", "desc")); 
+
+            onSnapshot(q, (snapshot) => {
+                const recruitmentsByMonth = {};
+                if (snapshot.empty) {
+                    recruitmentsList.innerHTML = '<p class="text-center">No recruitments have been logged yet.</p>';
+                    return;
+                }
+                snapshot.forEach((doc) => {
+                    const rec = doc.data();
+                    const recDate = rec.timestamp ? rec.timestamp.toDate() : new Date();
+                    const recId = doc.id;
+                    
+                    // Format to "Month Year" e.g., "November 2025"
+                    const monthKey = recDate.toLocaleString('default', { month: 'long', year: 'numeric' });
+                    
+                    if (!recruitmentsByMonth[monthKey]) {
+                        recruitmentsByMonth[monthKey] = [];
+                    }
+                    recruitmentsByMonth[monthKey].push({ ...rec, id: recId, date: recDate });
+                });
+                
+                recruitmentsList.innerHTML = '';
+                
+                // Get sorted keys (months)
+                const sortedMonthKeys = Object.keys(recruitmentsByMonth).sort((a, b) => {
+                    const dateA = new Date(a);
+                    const dateB = new Date(b);
+                    return dateB - dateA; // Sort descending
+                });
+
+                for (const monthKey of sortedMonthKeys) {
+                    const monthHeader = document.createElement('h4');
+                    monthHeader.className = 'month-header'; // Use new class, styled like week-header
+                    monthHeader.textContent = `${monthKey}`;
+                    recruitmentsList.appendChild(monthHeader);
+                    
+                    // Events are already sorted by timestamp (desc) from the query
+                    recruitmentsByMonth[monthKey].forEach(rec => {
+                        const recDiv = document.createElement('div');
+                        recDiv.className = 'recruitment-card'; // Use new class
+                        const timestamp = rec.date.toLocaleString();
+                        
+                        const discordStatus = rec.inDiscord 
+                            ? '<span class="discord-status-yes">In Discord</span>' 
+                            : '<span class="discord-status-no">Not in Discord</span>';
+
+                        recDiv.innerHTML = `
+                            <div class="recruitment-header">
+                                <span class="recruiter-info">
+                                    Recruiter: ${rec.recruiterUsername}
+                                </span>
+                                <span class="time">${timestamp}</span>
+                                <button class="delete-btn" onclick="window.deleteRecruitment('${rec.id}')">X</button>
+                            </div>
+                            <div class="recruit-info-line">
+                                Recruited: <span class="recruit-username">${rec.recruitUsername}</span>
+                                ${discordStatus}
+                            </div>
+                            <span class="logger-info">Logged by: ${rec.loggedBy}</span>
+                        `;
+                        recruitmentsList.appendChild(recDiv);
+                    });
+                }
+            }, (error) => {
+                console.error("Error listening to recruitments:", error);
+                recruitmentsList.innerHTML = '<p class="text-center" style="color:red;">Failed to retrieve recruitment list.</p>';
+            });
+        }
+
+        async function logNewRecruitment(recruiterUsername, recruitUsername, inDiscord) {
+            if (!db) {
+                document.getElementById('log-recruitment-status').textContent = 'Error: Not connected to database.';
+                return;
+            }
+            document.getElementById('log-recruitment-status').textContent = 'Logging recruitment...';
+            
+            const data = {
+                recruiterUsername: recruiterUsername, 
+                recruitUsername: recruitUsername,
+                inDiscord: inDiscord,
+                loggedBy: window.currentUsername || 'Unknown High Command',
+                timestamp: serverTimestamp() 
+            };
+            
+            try {
+                await addDoc(collection(db, RECRUITMENT_PATH), data);
+                document.getElementById('log-recruitment-status').textContent = 'Recruitment logged successfully! Returning to list view...';
+                
+                document.getElementById('recruiter-username-input').value = '';
+                document.getElementById('recruit-username-input').value = '';
+                document.getElementById('recruit-discord-checkbox').checked = false;
+
+                setTimeout(() => {
+                    window.hideLogRecruitmentForm(); 
+                    window.openTab('recruitments'); 
+                }, 500); 
+            } catch (e) {
+                console.error("Error adding recruitment: ", e);
+                document.getElementById('log-recruitment-status').textContent = `Error: Could not log recruitment. ${e.message}`;
+            }
+        }
+
+        async function deleteRecruitment(recruitmentId) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return;
+            }
+            const result = confirm("Are you sure you want to delete this recruitment log?");
+            if (result) {
+                try {
+                    const docRef = doc(db, RECRUITMENT_PATH, recruitmentId);
+                    await deleteDoc(docRef);
+                    console.log("Recruitment deleted successfully:", recruitmentId);
+                } catch (e) {
+                    console.error("Error deleting recruitment: ", e);
+                }
             }
         }
 
@@ -600,8 +734,6 @@
             document.getElementById('post-status').textContent = 'Posting announcement...';
 
             try {
-                // Rank logic is now less critical as auth is separate,
-                // but we keep it for display consistency.
                 let rank = 'High Command';
                 if (user === '0breezedev') rank = 'Archon'; 
                 else if (user === 'Fierce__Fish') rank = 'Vice Admiral'; 
@@ -641,7 +773,12 @@
         window.deleteEvent = deleteEvent; 
         window.loadEvents = loadEvents; 
         
-        // --- NEW Exposed Login Functions ---
+        // --- NEW Exposed Recruitment Functions ---
+        window.loadRecruitments = loadRecruitments;
+        window.logNewRecruitment = logNewRecruitment;
+        window.deleteRecruitment = deleteRecruitment;
+        
+        // --- Exposed Login Functions ---
         window.checkFirestoreLogin = checkFirestoreLogin;
         window.loadLogins = loadLogins;
         window.registerNewLogin = registerNewLogin;
@@ -650,7 +787,6 @@
     </script>
     
     <style>
-        /* Existing CSS is kept the same, with added styles for officer list */
         :root {
             --navy-blue: #001f3f;
             --light-gray: #f4f4f4;
@@ -662,7 +798,7 @@
             --tab-active: #ffffff;
             --button-hover-darken: #0056b3;
             --success-color: #28a745;
-            --edit-color: #17a2b8; /* Added color for edit button */
+            --edit-color: #17a2b8;
             --edit-hover-color: #117a8b;
         }
 
@@ -675,6 +811,7 @@
             min-height: 100vh;
             margin: 0;
             padding: 20px;
+            box-sizing: border-box; /* Added for better sizing */
         }
 
         .container {
@@ -683,9 +820,10 @@
             border-radius: 10px;
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
             width: 100%;
-            max-width: 800px; 
+            max-width: 900px; /* Increased from 800px to give more room */
             text-align: center;
             color: var(--text-color);
+            box-sizing: border-box; /* Added for better sizing */
         }
 
         #login-box {
@@ -719,7 +857,7 @@
         input[type="text"], 
         input[type="password"],
         textarea,
-        select { /* Added select for dropdowns */
+        select {
             width: 100%;
             padding: 12px;
             border: 1px solid #ccc;
@@ -786,23 +924,26 @@
         /* Tab Navigation */
         .tabs {
             display: flex;
-            background-color: #e9ecef; 
+            flex-wrap: nowrap; /* Changed from 'wrap' to 'nowrap' to force horizontal stacking */
+            background-color: #e9ecef;
             border-bottom: 1px solid #dee2e6;
-            padding: 0 40px; 
+            padding: 0 40px;
+            overflow-x: auto; /* Add horizontal scroll just in case */
         }
 
         .tab-button {
-            padding: 15px 25px;
+            padding: 15px 20px; /* Slightly reduced padding */
             cursor: pointer;
             border: none;
             background-color: var(--tab-inactive);
             color: var(--navy-blue);
             font-weight: bold;
-            font-size: 16px;
+            font-size: 15px; /* Slightly reduced font size */
             border-top-left-radius: 8px;
             border-top-right-radius: 8px;
             margin-right: 5px;
             transition: background-color 0.3s ease, color 0.3s ease;
+            white-space: nowrap; /* Keep text on one line */
         }
 
         .tab-button.active {
@@ -888,6 +1029,8 @@
         .time {
             font-size: 0.85em;
             color: #999;
+            white-space: nowrap; /* Prevent time from wrapping */
+            padding-left: 10px; /* Add space */
         }
         .rank-indicator {
             display: block;
@@ -934,7 +1077,7 @@
             border-bottom: none;
         }
         
-        /* --- NEW: Panel Login List Styles (Copied from Officer) --- */
+        /* Panel Login List Styles */
         #admin-list {
             display: flex;
             flex-direction: column;
@@ -970,14 +1113,14 @@
         }
         
         /* Officer/Admin Registration Form Styles */
-        #officer-register-form, #admin-register-form {
+        #officer-register-form, #admin-register-form, #recruitment-log-form {
             padding: 20px;
             border: 1px solid #ccc;
             border-radius: 8px;
             background-color: #fff;
             margin-top: 20px;
         }
-        #register-status, #admin-register-status {
+        #register-status, #admin-register-status, #log-recruitment-status {
             margin-top: 15px;
             font-weight: bold;
             color: var(--success-color);
@@ -1004,7 +1147,7 @@
             cursor: pointer;
             font-size: 0.9em;
             font-weight: bold;
-            width: 50px; /* Slightly wider */
+            width: 50px; 
             height: 30px;
             transition: background-color 0.3s ease;
             margin: 0;
@@ -1060,6 +1203,11 @@
             color: var(--navy-blue);
             display: flex;
             align-items: center;
+            flex-shrink: 1; /* Allow shrinking */
+            min-width: 0; /* For flex-shrink to work */
+        }
+        .host-info .event-type-badge {
+            flex-shrink: 0; /* Don't shrink badge */
         }
         .event-type-badge {
             background-color: var(--navy-blue);
@@ -1100,9 +1248,93 @@
             text-align: center;
         }
 
+        /* --- NEW: Recruitment List Styles --- */
+        #recruitments-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .month-header {
+            background-color: var(--navy-blue);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 15px;
+            margin-bottom: 5px;
+            font-size: 1.2em;
+        }
+        .recruitment-card {
+            background-color: #ffffff;
+            border: 1px solid #ddd;
+            border-left: 5px solid var(--edit-color); /* New color */
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            text-align: left;
+        }
+        .recruitment-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 1px dashed #eee;
+        }
+        .recruiter-info {
+            font-weight: bold;
+            color: var(--navy-blue);
+            display: flex;
+            align-items: center;
+        }
+        .recruit-info-line {
+            font-size: 1.1em;
+            margin: 5px 0 10px 0;
+            padding: 5px 0;
+            color: var(--navy-blue);
+            font-weight: 500;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .recruit-username {
+            font-weight: bold;
+        }
+        .discord-status-yes {
+            color: var(--success-color);
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        .discord-status-no {
+            color: var(--error-color);
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .checkbox-group input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            margin: 0;
+            flex-shrink: 0;
+        }
+        .checkbox-group label {
+            margin-bottom: 0; 
+            font-weight: normal; 
+            color: var(--text-color);
+        }
+        /* --- End New Styles --- */
+
+
         /* Modal Styles */
         .modal-overlay {
-            display: none; /* Hidden by default */
+            display: none; 
             position: fixed;
             z-index: 1000;
             left: 0;
@@ -1110,7 +1342,7 @@
             width: 100%;
             height: 100%;
             overflow: auto;
-            background-color: rgba(0,0,0,0.5); /* Dim background */
+            background-color: rgba(0,0,0,0.5); 
             justify-content: center;
             align-items: center;
         }
@@ -1189,7 +1421,7 @@
             <button id="tab-announcements" class="tab-button" onclick="openTab('announcements')">Announcements</button>
             <button id="tab-officers" class="tab-button" onclick="openTab('officers')">Officers</button> 
             <button id="tab-events" class="tab-button" onclick="openTab('events')">Events</button> 
-            <!-- --- NEW --- Admin tab, hidden by default -->
+            <button id="tab-recruitments" class="tab-button" onclick="openTab('recruitments')">Recruitments</button> <!-- NEW -->
             <button id="tab-admin" class="tab-button" onclick="openTab('admin')" style="display: none;">Admin</button>
         </div>
 
@@ -1206,6 +1438,9 @@
                 </div>
                 <div class="home-button" onclick="showLogForm()"> 
                     Log Event
+                </div>
+                <div class="home-button" onclick="showLogRecruitmentForm()"> <!-- NEW -->
+                    Log Recruitment
                 </div>
             </div>
         </div>
@@ -1316,7 +1551,41 @@
 
         </div>
         
-        <!-- --- NEW --- Admin Tab Content -->
+        <!-- --- NEW --- Recruitment Tab Content -->
+        <div id="recruitments" class="tab-content" style="display: none;">
+            
+            <div id="recruitment-view-area">
+                <h3 class="text-center">Logged Recruitments (Grouped by Month)</h3>
+                <div id="recruitments-list">
+                    <p class="text-center">Loading recruitment logs...</p>
+                </div>
+                <button onclick="showLogRecruitmentForm()" style="margin-top: 20px; max-width: 300px; float: right;">Log New Recruitment</button>
+            </div>
+            
+            <div id="recruitment-log-form" style="display: none;">
+                <h3>Log New Recruitment</h3>
+                <form id="logRecruitmentForm" onsubmit="handleLogRecruitmentForm(event)">
+                    <div class="input-group">
+                        <label for="recruiter-username-input">Recruiter Username</label>
+                        <input type="text" id="recruiter-username-input" placeholder="Enter your Roblox username" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="recruit-username-input">Recruit's Username</label>
+                        <input type="text" id="recruit-username-input" placeholder="Enter recruit's Roblox username" required>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="recruit-discord-checkbox">
+                        <label for="recruit-discord-checkbox">Is the recruit in the Discord server?</label>
+                    </div>
+                    <button type="submit">Log Recruitment</button>
+                </form>
+                <p id="log-recruitment-status"></p>
+                <button class="panel-header button" style="background-color: #6c757d; margin-top: 10px; max-width: 150px;" onclick="hideLogRecruitmentForm()">Cancel</button>
+            </div>
+
+        </div>
+        
+        <!-- Admin Tab Content -->
         <div id="admin" class="tab-content" style="display: none;">
             
             <div id="admin-view-area">
@@ -1347,7 +1616,7 @@
         </div>
     </div>
 
-    <!-- Officer Edit Modal (Unchanged) -->
+    <!-- Officer Edit Modal -->
     <div id="edit-officer-modal" class="modal-overlay">
         <div class="modal-content">
             <h3>Edit Officer Details</h3>
@@ -1389,7 +1658,7 @@
         </div>
     </div>
     
-    <!-- --- NEW --- Admin Edit Modal -->
+    <!-- Admin Edit Modal -->
     <div id="edit-admin-modal" class="modal-overlay">
         <div class="modal-content">
             <h3>Edit Panel Login</h3>
@@ -1403,7 +1672,6 @@
                 
                 <div class="input-group">
                     <label for="edit-admin-password">Password</label>
-                    <!-- Using type="text" to allow editing, as password type fields don't show current value -->
                     <input type="text" id="edit-admin-password" required>
                 </div>
                 
@@ -1431,6 +1699,10 @@
             deleteEvent, 
             loadEvents,
             // --- NEW ---
+            loadRecruitments,
+            logNewRecruitment,
+            deleteRecruitment,
+            // ---
             checkFirestoreLogin,
             loadLogins,
             registerNewLogin,
@@ -1439,9 +1711,6 @@
         } = window;
         
         const SESSION_KEY = "fishLegionHCUser";
-
-        // --- DEPRECATED --- The validAccounts object is no longer used for login
-        // const validAccounts = { ... };
 
         let activeUser = null; 
         
@@ -1459,7 +1728,6 @@
 
             errorMessage.textContent = 'Checking credentials...';
             
-            // --- UPDATED --- Check against Firestore
             const isAuthenticated = await window.checkFirestoreLogin(username, password);
             
             if (isAuthenticated) {
@@ -1485,16 +1753,13 @@
             activeUser = username; 
             window.currentUsername = username; 
             
-            // --- NEW --- Show/Hide Admin Tab based on logged-in user
             const adminTab = document.getElementById('tab-admin');
             if (username === '0breezedev' || username === 'archon') {
                 adminTab.style.display = 'block';
             } else {
                 adminTab.style.display = 'none';
             }
-            // --- END NEW ---
             
-            // Set the initial active tab
             openTab('home');
         }
 
@@ -1503,17 +1768,12 @@
             document.getElementById('main-panel').style.display = 'none';
             document.getElementById('login-box').style.display = 'block';
             document.getElementById('error-message').textContent = '';
-            
-            // --- NEW --- Hide admin tab on logout
             document.getElementById('tab-admin').style.display = 'none';
-            
             activeUser = null; 
         }
 
         function checkSession() {
             const savedUser = localStorage.getItem(SESSION_KEY);
-            // --- UPDATED --- No password check, just trust the session
-            // If the user exists in session, log them in.
             if (savedUser) {
                 completeLogin(savedUser);
             }
@@ -1540,7 +1800,8 @@
             hidePostForm(true);
             hideRegisterForm(true); 
             hideLogForm(true);
-            hideAdminRegisterForm(true); // --- NEW ---
+            hideLogRecruitmentForm(true); // --- NEW ---
+            hideAdminRegisterForm(true);
             
             if (tabName === 'officers') {
                 window.loadOfficers(); 
@@ -1548,7 +1809,10 @@
             if (tabName === 'events') { 
                 window.loadEvents(); 
             }
-            if (tabName === 'admin') { // --- NEW ---
+            if (tabName === 'recruitments') { // --- NEW ---
+                window.loadRecruitments();
+            }
+            if (tabName === 'admin') {
                 window.loadLogins();
             }
         }
@@ -1603,7 +1867,25 @@
             }
         }
         
-        // --- NEW --- Admin views
+        // --- NEW --- Recruitment views
+        function showLogRecruitmentForm() {
+            openTab('recruitments'); 
+            document.getElementById('recruitment-view-area').style.display = 'none';
+            document.getElementById('recruitment-log-form').style.display = 'block';
+            document.getElementById('log-recruitment-status').textContent = '';
+            document.getElementById('recruiter-username-input').value = '';
+            document.getElementById('recruit-username-input').value = '';
+            document.getElementById('recruit-discord-checkbox').checked = false;
+        }
+
+        function hideLogRecruitmentForm(force = false) {
+            if (document.getElementById('recruitments').style.display === 'block' || force) {
+                document.getElementById('recruitment-log-form').style.display = 'none';
+                document.getElementById('recruitment-view-area').style.display = 'block';
+            }
+        }
+        
+        // Admin views
         function showAdminRegisterForm() {
             openTab('admin'); 
             document.getElementById('admin-view-area').style.display = 'none';
@@ -1635,7 +1917,6 @@
             modal.style.display = 'none';
         }
         
-        // --- NEW --- Admin Modal Control
         function showAdminEditModal(loginId, currentUsername, currentPassword) {
             const modal = document.getElementById('edit-admin-modal');
             document.getElementById('edit-admin-id').value = loginId;
@@ -1753,7 +2034,25 @@
             }
         }
         
-        // --- NEW --- Form submission handler for Admin Register
+        // --- NEW --- Form submission handler for Recruitments
+        function handleLogRecruitmentForm(event) {
+            event.preventDefault();
+            const recruiterUsername = document.getElementById('recruiter-username-input').value.trim();
+            const recruitUsername = document.getElementById('recruit-username-input').value.trim();
+            const inDiscord = document.getElementById('recruit-discord-checkbox').checked;
+            const statusEl = document.getElementById('log-recruitment-status');
+
+            if (recruiterUsername.length === 0 || recruitUsername.length === 0) {
+                 statusEl.textContent = 'Error: Please fill all username fields.';
+                 return;
+            }
+            
+            if (window.logNewRecruitment) {
+                window.logNewRecruitment(recruiterUsername, recruitUsername, inDiscord);
+            }
+        }
+        
+        // Form submission handler for Admin Register
         function handleAdminRegisterForm(event) {
             event.preventDefault();
             const username = document.getElementById('admin-username-input').value.trim();
@@ -1765,7 +2064,7 @@
             }
         }
         
-        // --- NEW --- Form submission handler for Admin Edit Modal
+        // Form submission handler for Admin Edit Modal
         async function handleAdminEditForm(event) {
             event.preventDefault();
             const loginId = document.getElementById('edit-admin-id').value;
@@ -1809,6 +2108,9 @@
         window.handleEditForm = handleEditForm;
         
         // --- NEW Exposed Functions ---
+        window.showLogRecruitmentForm = showLogRecruitmentForm;
+        window.hideLogRecruitmentForm = hideLogRecruitmentForm;
+        window.handleLogRecruitmentForm = handleLogRecruitmentForm;
         window.showAdminRegisterForm = showAdminRegisterForm;
         window.hideAdminRegisterForm = hideAdminRegisterForm;
         window.handleAdminRegisterForm = handleAdminRegisterForm;
