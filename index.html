@@ -34,6 +34,7 @@
         const EVENT_PATH = `events`; 
         const RECRUITMENT_PATH = `recruitments`; // --- NEW ---
         const LOGIN_PATH = `panel_logins`; 
+        const RANKS_PATH = `ranks`; // --- NEW: Rank Management --- 
 
         // Function to set up Firebase services and authentication
         async function setupFirebase() {
@@ -265,6 +266,186 @@
             }
         }
 
+        // --- RANK MANAGEMENT FUNCTIONS (NEW) ---
+
+        // LOAD ALL RANKS
+        function loadRanks() {
+            const ranksList = document.getElementById('ranks-list');
+            if (!db) {
+                console.error("DB is not initialized yet in loadRanks.");
+                ranksList.innerHTML = '<p class="text-center" style="color:red;">Database connection error. Try refreshing.</p>';
+                return;
+            }
+            
+            const ranksCollection = collection(db, RANKS_PATH);
+            const q = query(ranksCollection, orderBy("order", "asc"));
+            
+            onSnapshot(q, (snapshot) => {
+                ranksList.innerHTML = '';
+                
+                if (snapshot.empty) {
+                    ranksList.innerHTML = '<p class="text-center">No ranks have been added yet.</p>';
+                    return;
+                }
+                
+                // Add header row
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'rank-card header-row';
+                headerDiv.innerHTML = `<span>Rank Name</span><span>Actions</span>`;
+                ranksList.appendChild(headerDiv);
+                
+                snapshot.forEach((doc) => {
+                    const rank = doc.data();
+                    const rankId = doc.id;
+                    
+                    const rankDiv = document.createElement('div');
+                    rankDiv.className = 'rank-card';
+                    rankDiv.innerHTML = `
+                        <span>${rank.name}</span>
+                        <div class="action-buttons">
+                            <button class="edit-btn" onclick="window.showRankEditModal('${rankId}', '${rank.name.replace(/'/g, "\\'")}')">Edit</button>
+                            <button class="delete-btn" onclick="window.deleteRank('${rankId}')">X</button>
+                        </div>
+                    `;
+                    ranksList.appendChild(rankDiv);
+                });
+            }, (error) => {
+                console.error("Error listening to ranks:", error);
+                ranksList.innerHTML = '<p class="text-center" style="color:red;">Failed to retrieve ranks list.</p>';
+            });
+        }
+
+        // ADD NEW RANK
+        async function addNewRank(rankName) {
+            if (!db) {
+                document.getElementById('rank-add-status').textContent = 'Error: Not connected to database.';
+                return;
+            }
+            
+            if (!rankName || rankName.trim().length === 0) {
+                document.getElementById('rank-add-status').textContent = 'Error: Rank name cannot be empty.';
+                return;
+            }
+            
+            document.getElementById('rank-add-status').textContent = 'Adding rank...';
+            
+            try {
+                // Get the current count to set order
+                const snapshot = await getDocs(collection(db, RANKS_PATH));
+                const order = snapshot.size;
+                
+                await addDoc(collection(db, RANKS_PATH), {
+                    name: rankName.trim(),
+                    order: order,
+                    createdBy: window.currentUsername || 'Unknown',
+                    timestamp: serverTimestamp()
+                });
+                
+                document.getElementById('rank-add-status').textContent = 'Rank added successfully!';
+                document.getElementById('rank-name-input').value = '';
+                
+                setTimeout(() => {
+                    document.getElementById('rank-add-status').textContent = '';
+                }, 2000);
+            } catch (e) {
+                console.error("Error adding rank: ", e);
+                document.getElementById('rank-add-status').textContent = `Error: Could not add rank. ${e.message}`;
+            }
+        }
+
+        // DELETE RANK
+        async function deleteRank(rankId) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return;
+            }
+            const result = confirm("Are you sure you want to delete this rank?");
+            if (result) {
+                try {
+                    const docRef = doc(db, RANKS_PATH, rankId);
+                    await deleteDoc(docRef);
+                    console.log("Rank deleted successfully:", rankId);
+                } catch (e) {
+                    console.error("Error deleting rank: ", e);
+                    alert('Error deleting rank: ' + e.message);
+                }
+            }
+        }
+
+        // UPDATE RANK
+        async function updateRank(rankId, newRankName) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return false;
+            }
+            try {
+                const docRef = doc(db, RANKS_PATH, rankId);
+                await updateDoc(docRef, {
+                    name: newRankName
+                });
+                console.log("Rank updated successfully:", rankId);
+                return true;
+            } catch (e) {
+                console.error("Error updating rank: ", e);
+                return false;
+            }
+        }
+
+        // LOAD DEFAULT RANKS
+        async function loadDefaultRanks() {
+            if (!db) {
+                alert('Database is not initialized.');
+                return;
+            }
+            
+            const result = confirm('This will add all default ranks to the system. Continue?');
+            if (!result) return;
+            
+            const defaultRanks = [
+                'Junior Shark',
+                'Reef Shark',
+                'Hammerhead Shark',
+                'Megalodon',
+                'Reef Guardian',
+                'Guardian',
+                'Hero',
+                'Angel',
+                'Marshal',
+                'Treasurer of FISH',
+                'Profishien',
+                'Angler',
+                'Fishing Overseer',
+                'Archon'
+            ];
+            
+            try {
+                let addCount = 0;
+                const ranksCollection = collection(db, RANKS_PATH);
+                const snapshot = await getDocs(ranksCollection);
+                
+                for (let i = 0; i < defaultRanks.length; i++) {
+                    const rankName = defaultRanks[i];
+                    
+                    // Check if rank already exists
+                    const existingRank = snapshot.docs.find(doc => doc.data().name === rankName);
+                    if (!existingRank) {
+                        await addDoc(ranksCollection, {
+                            name: rankName,
+                            order: i,
+                            createdBy: window.currentUsername || 'System',
+                            timestamp: serverTimestamp()
+                        });
+                        addCount++;
+                    }
+                }
+                
+                alert(`Successfully added ${addCount} rank(s) to the system.`);
+                window.loadRanks();
+            } catch (e) {
+                console.error('Error loading default ranks:', e);
+                alert('Error loading default ranks: ' + e.message);
+            }
+        }
 
         // --- OFFICER MANAGEMENT FUNCTIONS (Unchanged) ---
         
@@ -440,10 +621,29 @@
                 const sortedWeekKeys = Object.keys(eventsByWeek).sort((a, b) => new Date(b.split(' - ')[0]) - new Date(a.split(' - ')[0]));
 
                 for (const weekKey of sortedWeekKeys) {
+                    const weekContainer = document.createElement('div');
+                    weekContainer.className = 'collapsible-section';
+                    
                     const weekHeader = document.createElement('h4');
-                    weekHeader.className = 'week-header';
-                    weekHeader.textContent = `Week: ${weekKey}`;
-                    eventsList.appendChild(weekHeader);
+                    weekHeader.className = 'week-header collapsible-header';
+                    weekHeader.style.cursor = 'pointer';
+                    weekHeader.innerHTML = `<span class="collapse-icon">▶</span> Week: ${weekKey}`;
+                    
+                    const weekContent = document.createElement('div');
+                    weekContent.className = 'collapsible-content';
+                    weekContent.style.display = 'none';
+                    
+                    // Add click listener to toggle
+                    weekHeader.addEventListener('click', () => {
+                        const isCollapsed = weekContent.style.display === 'none';
+                        weekContent.style.display = isCollapsed ? 'block' : 'none';
+                        const icon = weekHeader.querySelector('.collapse-icon');
+                        icon.textContent = isCollapsed ? '▼' : '▶';
+                    });
+                    
+                    weekContainer.appendChild(weekHeader);
+                    weekContainer.appendChild(weekContent);
+                    eventsList.appendChild(weekContainer);
                     
                     // Sort events within the week
                     const sortedEvents = eventsByWeek[weekKey].sort((a, b) => b.date - a.date);
@@ -476,7 +676,7 @@
                             <div class="event-detail-line">${mainDetail}</div>
                             <span class="logger-info">Logged by: ${event.loggedBy}</span>
                         `;
-                        eventsList.appendChild(eventDiv);
+                        weekContent.appendChild(eventDiv);
                     });
                 }
             }, (error) => {
@@ -554,6 +754,51 @@
             }
         }
 
+        // POPULATE RANK DROPDOWNS FROM FIRESTORE
+        async function populateRankDropdowns() {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return;
+            }
+            
+            try {
+                const ranksCollection = collection(db, RANKS_PATH);
+                const q = query(ranksCollection, orderBy("order", "asc"));
+                const snapshot = await getDocs(q);
+                
+                const ranks = [];
+                snapshot.forEach((doc) => {
+                    ranks.push(doc.data().name);
+                });
+                
+                // Update officer registration dropdown
+                const registerDropdown = document.getElementById('officer-rank-input');
+                if (registerDropdown) {
+                    registerDropdown.innerHTML = '<option value="" disabled selected>Select a rank</option>';
+                    ranks.forEach(rank => {
+                        const option = document.createElement('option');
+                        option.value = rank;
+                        option.textContent = rank;
+                        registerDropdown.appendChild(option);
+                    });
+                }
+                
+                // Update officer edit modal dropdown
+                const editDropdown = document.getElementById('edit-officer-rank');
+                if (editDropdown) {
+                    editDropdown.innerHTML = '<option value="" disabled>Select a rank</option>';
+                    ranks.forEach(rank => {
+                        const option = document.createElement('option');
+                        option.value = rank;
+                        option.textContent = rank;
+                        editDropdown.appendChild(option);
+                    });
+                }
+            } catch (e) {
+                console.error("Error populating rank dropdowns:", e);
+            }
+        }
+
         
         // --- NEW: RECRUITMENT MANAGEMENT FUNCTIONS ---
 
@@ -597,10 +842,29 @@
                 });
 
                 for (const monthKey of sortedMonthKeys) {
+                    const monthContainer = document.createElement('div');
+                    monthContainer.className = 'collapsible-section';
+                    
                     const monthHeader = document.createElement('h4');
-                    monthHeader.className = 'month-header'; // Use new class, styled like week-header
-                    monthHeader.textContent = `${monthKey}`;
-                    recruitmentsList.appendChild(monthHeader);
+                    monthHeader.className = 'month-header collapsible-header';
+                    monthHeader.style.cursor = 'pointer';
+                    monthHeader.innerHTML = `<span class="collapse-icon">▶</span> ${monthKey}`;
+                    
+                    const monthContent = document.createElement('div');
+                    monthContent.className = 'collapsible-content';
+                    monthContent.style.display = 'none';
+                    
+                    // Add click listener to toggle
+                    monthHeader.addEventListener('click', () => {
+                        const isCollapsed = monthContent.style.display === 'none';
+                        monthContent.style.display = isCollapsed ? 'block' : 'none';
+                        const icon = monthHeader.querySelector('.collapse-icon');
+                        icon.textContent = isCollapsed ? '▼' : '▶';
+                    });
+                    
+                    monthContainer.appendChild(monthHeader);
+                    monthContainer.appendChild(monthContent);
+                    recruitmentsList.appendChild(monthContainer);
                     
                     // Events are already sorted by timestamp (desc) from the query
                     recruitmentsByMonth[monthKey].forEach(rec => {
@@ -626,7 +890,7 @@
                             </div>
                             <span class="logger-info">Logged by: ${rec.loggedBy}</span>
                         `;
-                        recruitmentsList.appendChild(recDiv);
+                        monthContent.appendChild(recDiv);
                     });
                 }
             }, (error) => {
@@ -784,6 +1048,14 @@
         window.registerNewLogin = registerNewLogin;
         window.deleteLogin = deleteLogin;
         window.updateLogin = updateLogin;
+        
+        // --- Exposed Rank Management Functions ---
+        window.loadRanks = loadRanks;
+        window.addNewRank = addNewRank;
+        window.deleteRank = deleteRank;
+        window.updateRank = updateRank;
+        window.loadDefaultRanks = loadDefaultRanks;
+        window.populateRankDropdowns = populateRankDropdowns;
     </script>
     
     <style>
@@ -1112,6 +1384,39 @@
             border-bottom: none;
         }
         
+        /* Rank List Styles */
+        #ranks-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 0;
+            background-color: #f9f9f9;
+            overflow: hidden;
+        }
+        .rank-card {
+            display: grid;
+            grid-template-columns: 1fr 110px;
+            align-items: center;
+            padding: 12px 15px;
+            background-color: #fff;
+            border-bottom: 1px solid #eee;
+            font-size: 1em;
+            text-align: left;
+        }
+        .rank-card.header-row {
+            font-weight: bold;
+            background-color: var(--navy-blue);
+            color: white;
+            padding: 12px 15px;
+            border-bottom: 1px solid #ddd;
+            grid-template-columns: 1fr 110px;
+        }
+        .rank-card:last-of-type {
+            border-bottom: none;
+        }
+        
         /* Officer/Admin Registration Form Styles */
         #officer-register-form, #admin-register-form, #recruitment-log-form {
             padding: 20px;
@@ -1172,6 +1477,31 @@
             flex-direction: column;
             gap: 10px;
         }
+        
+        /* Collapsible Section Styles */
+        .collapsible-section {
+            margin-bottom: 15px;
+        }
+        .collapsible-header {
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.2s ease;
+        }
+        .collapsible-header:hover {
+            background-color: #004080 !important;
+        }
+        .collapse-icon {
+            display: inline-block;
+            margin-right: 8px;
+            transition: transform 0.2s ease;
+            font-size: 0.9em;
+        }
+        .collapsible-content {
+            display: block;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+        
         .week-header {
             background-color: var(--navy-blue);
             color: white;
@@ -1490,19 +1820,20 @@
                         <label for="officer-rank-input">Current Rank In Game</label>
                         <select id="officer-rank-input" required>
                             <option value="" disabled selected>Select a rank</option>
-                            <option value="Junior Officer">Junior Officer</option>
-                            <option value="Warrant Officer">Warrant Officer</option>
-                            <option value="Chief Warrant Officer">Chief Warrant Officer</option>
-                            <option value="Ensign">Ensign</option>
-                            <option value="Lieutenant">Lieutenant</option>
-                            <option value="Lieutenant Commander">Lieutenant Commander</option>
-                            <option value="Commander">Commander</option>
-                            <option value="Captain">Captain</option>
+                            <option value="Junior Shark">Junior Shark</option>
+                            <option value="Reef Shark">Reef Shark</option>
+                            <option value="Hammerhead Shark">Hammerhead Shark</option>
+                            <option value="Megalodon">Megalodon</option>
+                            <option value="Reef Guardian">Reef Guardian</option>
+                            <option value="Guardian">Guardian</option>
+                            <option value="Hero">Hero</option>
+                            <option value="Angel">Angel</option>
                             <option value="Marshal">Marshal</option>
-                            <option value="Rear Admiral">Rear Admiral</option>
-                            <option value="Vice Admiral">Vice Admiral</option>
-                            <option value="Admiral">Admiral</option>
-                            <option value="Fleet Admiral">Fleet Admiral</option>
+                            <option value="Treasurer of FISH">Treasurer of FISH</option>
+                            <option value="Profishien">Profishien</option>
+                            <option value="Angler">Angler</option>
+                            <option value="Fishing Overseer">Fishing Overseer</option>
+                            <option value="Archon">Archon</option>
                         </select>
                     </div>
                     <button type="submit">Register Officer</button>
@@ -1612,6 +1943,33 @@
                 <p id="admin-register-status"></p>
                 <button class="panel-header button" style="background-color: #6c757d; margin-top: 10px; max-width: 150px;" onclick="hideAdminRegisterForm()">Cancel</button>
             </div>
+            
+            <!-- RANK MANAGEMENT SECTION -->
+            <div id="rank-management-area" style="margin-top: 50px; padding-top: 40px; border-top: 2px solid #ccc;">
+                <h3 class="text-center">Manage Officer Ranks</h3>
+                <p class="text-center" style="color: #666;">Add, edit, or remove ranks from the system</p>
+                
+                <div style="margin-top: 15px; margin-bottom: 20px; text-align: center;">
+                    <button onclick="window.loadDefaultRanks()" style="background-color: var(--edit-color); max-width: 300px;">Load Default Ranks</button>
+                </div>
+                
+                <div style="margin-top: 20px; margin-bottom: 20px;">
+                    <h4>All Ranks</h4>
+                    <div id="ranks-list" style="border: 1px solid #ddd; border-radius: 8px; background-color: #f9f9f9; max-height: 300px; overflow-y: auto;">
+                        <p class="text-center">Loading ranks...</p>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 20px; padding: 20px; border: 1px solid #ccc; border-radius: 8px; background-color: #fff;">
+                    <h4>Add New Rank</h4>
+                    <div class="input-group">
+                        <label for="rank-name-input">Rank Name</label>
+                        <input type="text" id="rank-name-input" placeholder="Enter new rank name" required>
+                    </div>
+                    <button onclick="window.addNewRank(document.getElementById('rank-name-input').value)" style="max-width: 200px;">Add Rank</button>
+                    <p id="rank-add-status" style="margin-top: 10px; color: var(--success-color); font-weight: bold;"></p>
+                </div>
+            </div>
 
         </div>
     </div>
@@ -1632,19 +1990,20 @@
                     <label for="edit-officer-rank">Current Rank In Game</label>
                     <select id="edit-officer-rank" required>
                         <option value="" disabled>Select a rank</option>
-                        <option value="Junior Officer">Junior Officer</option>
-                        <option value="Warrant Officer">Warrant Officer</option>
-                        <option value="Chief Warrant Officer">Chief Warrant Officer</option>
-                        <option value="Ensign">Ensign</option>
-                        <option value="Lieutenant">Lieutenant</option>
-                        <option value="Lieutenant Commander">Lieutenant Commander</option>
-                        <option value="Commander">Commander</option>
-                        <option value="Captain">Captain</option>
+                        <option value="Junior Shark">Junior Shark</option>
+                        <option value="Reef Shark">Reef Shark</option>
+                        <option value="Hammerhead Shark">Hammerhead Shark</option>
+                        <option value="Megalodon">Megalodon</option>
+                        <option value="Reef Guardian">Reef Guardian</option>
+                        <option value="Guardian">Guardian</option>
+                        <option value="Hero">Hero</option>
+                        <option value="Angel">Angel</option>
                         <option value="Marshal">Marshal</option>
-                        <option value="Rear Admiral">Rear Admiral</option>
-                        <option value="Vice Admiral">Vice Admiral</option>
-                        <option value="Admiral">Admiral</option>
-                        <option value="Fleet Admiral">Fleet Admiral</option>
+                        <option value="Treasurer of FISH">Treasurer of FISH</option>
+                        <option value="Profishien">Profishien</option>
+                        <option value="Angler">Angler</option>
+                        <option value="Fishing Overseer">Fishing Overseer</option>
+                        <option value="Archon">Archon</option>
                     </select>
                 </div>
                 
@@ -1685,6 +2044,28 @@
         </div>
     </div>
 
+    <!-- Rank Edit Modal -->
+    <div id="edit-rank-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Edit Rank</h3>
+            <form id="edit-rank-form" onsubmit="handleEditRankForm(event)">
+                <input type="hidden" id="edit-rank-id">
+                
+                <div class="input-group">
+                    <label for="edit-rank-name">Rank Name</label>
+                    <input type="text" id="edit-rank-name" required>
+                </div>
+                
+                <p id="rank-edit-status"></p>
+
+                <div class="modal-buttons">
+                    <button type="button" class="cancel-btn" onclick="hideRankEditModal()">Cancel</button>
+                    <button type="submit" style="background-color: var(--success-color);">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
 
     <script type="module">
         // Import functions exposed globally in the first script tag
@@ -1707,7 +2088,13 @@
             loadLogins,
             registerNewLogin,
             deleteLogin,
-            updateLogin
+            updateLogin,
+            // --- NEW: Rank Management ---
+            loadRanks,
+            addNewRank,
+            deleteRank,
+            updateRank,
+            populateRankDropdowns
         } = window;
         
         const SESSION_KEY = "fishLegionHCUser";
@@ -1814,6 +2201,7 @@
             }
             if (tabName === 'admin') {
                 window.loadLogins();
+                window.loadRanks();
             }
         }
         
@@ -1841,6 +2229,7 @@
             document.getElementById('register-status').textContent = '';
             document.getElementById('officer-username-input').value = '';
             document.getElementById('officer-rank-input').value = '';
+            window.populateRankDropdowns();
         }
 
         function hideRegisterForm(force = false) {
@@ -1909,6 +2298,11 @@
             document.getElementById('edit-officer-username').value = currentUsername;
             document.getElementById('edit-officer-rank').value = currentRank;
             document.getElementById('edit-status').textContent = '';
+            window.populateRankDropdowns();
+            // Set the current rank after populating
+            setTimeout(() => {
+                document.getElementById('edit-officer-rank').value = currentRank;
+            }, 100);
             modal.style.display = 'flex';
         }
 
@@ -2089,6 +2483,44 @@
                 statusEl.style.color = 'var(--error-color)';
             }
         }
+        
+        // Rank modal control functions
+        function showRankEditModal(rankId, currentName) {
+            const modal = document.getElementById('edit-rank-modal');
+            document.getElementById('edit-rank-id').value = rankId;
+            document.getElementById('edit-rank-name').value = currentName;
+            document.getElementById('rank-edit-status').textContent = '';
+            modal.style.display = 'flex';
+        }
+
+        function hideRankEditModal() {
+            const modal = document.getElementById('edit-rank-modal');
+            modal.style.display = 'none';
+        }
+
+        async function handleEditRankForm(event) {
+            event.preventDefault();
+            const rankId = document.getElementById('edit-rank-id').value;
+            const newRankName = document.getElementById('edit-rank-name').value.trim();
+            const statusEl = document.getElementById('rank-edit-status');
+            if (!rankId || !newRankName) {
+                statusEl.textContent = 'Error: Rank name is required.';
+                return;
+            }
+            statusEl.textContent = 'Saving...';
+            statusEl.style.color = 'var(--navy-blue)';
+            const success = await window.updateRank(rankId, newRankName);
+            if (success) {
+                statusEl.textContent = 'Rank updated successfully!';
+                statusEl.style.color = 'var(--success-color)';
+                setTimeout(() => {
+                    hideRankEditModal();
+                }, 1000);
+            } else {
+                statusEl.textContent = 'Error: Could not update rank.';
+                statusEl.style.color = 'var(--error-color)';
+            }
+        }
 
         // Expose functions globally for HTML access
         window.openTab = openTab;
@@ -2117,6 +2549,11 @@
         window.showAdminEditModal = showAdminEditModal;
         window.hideAdminEditModal = hideAdminEditModal;
         window.handleAdminEditForm = handleAdminEditForm;
+        
+        // --- NEW: Rank Management Exposed Functions ---
+        window.showRankEditModal = showRankEditModal;
+        window.hideRankEditModal = hideRankEditModal;
+        window.handleEditRankForm = handleEditRankForm;
 
         // Check for existing session on page load
         checkSession();
