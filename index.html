@@ -664,14 +664,27 @@
                             mainDetail = 'No specific detail recorded';
                             eventDiv.style.borderLeftColor = '#999';
                         }
+                        const fivePlusBadge = event.hasFivePlusAttendees ? '<span class="five-plus-badge">5+</span>' : '';
+                        const safeHostUsername = (event.hostUsername || 'N/A');
+                        const safeHostRank = (event.hostRank || 'N/A');
+                        const safeType = (event.eventType || '').replace(/'/g, "\\'");
+                        const safeDetail = (event.eventSubType || event.mapName || '').replace(/'/g, "\\'");
+                        const escapedHost = safeHostUsername.replace(/'/g, "\\'");
+                        const escapedRank = safeHostRank.replace(/'/g, "\\'");
+                        const escapedId = (event.id || '').replace(/'/g, "\\'");
+
                         eventDiv.innerHTML = `
                             <div class="event-header">
                                 <span class="host-info">
                                     <span class="event-type-badge">${event.eventType}</span>
-                                    Hosted by: ${event.hostUsername} (${event.hostRank})
+                                    Hosted by: ${safeHostUsername} (${safeHostRank})
+                                    ${fivePlusBadge}
                                 </span>
                                 <span class="time">${timestamp}</span>
-                                <button class="delete-btn" onclick="window.deleteEvent('${event.id}')">X</button>
+                                <div class="action-buttons">
+                                    <button class="edit-btn" onclick="window.showEventEditModal('${escapedId}', '${escapedHost}', '${escapedRank}', '${safeType}', '${safeDetail}', ${event.hasFivePlusAttendees || false})">Edit</button>
+                                    <button class="delete-btn" onclick="window.deleteEvent('${escapedId}')">X</button>
+                                </div>
                             </div>
                             <div class="event-detail-line">${mainDetail}</div>
                             <span class="logger-info">Logged by: ${event.loggedBy}</span>
@@ -685,7 +698,7 @@
             });
         }
         
-        async function logNewEvent(hostUsername, hostRank, eventType, eventDetail) {
+        async function logNewEvent(hostUsername, hostRank, eventType, eventDetail, hasFivePlusAttendees) {
             if (!db) {
                 document.getElementById('log-status').textContent = 'Error: Not connected to database.';
                 return;
@@ -695,6 +708,7 @@
                 hostUsername: hostUsername, 
                 hostRank: hostRank,
                 eventType: eventType,
+                hasFivePlusAttendees: hasFivePlusAttendees || false,
                 loggedBy: window.currentUsername || 'Unknown High Command',
                 timestamp: serverTimestamp() 
             };
@@ -733,6 +747,33 @@
             }
         }
         
+        async function updateEvent(eventId, hostUsername, hostRank, eventType, eventDetail, hasFivePlusAttendees) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return false;
+            }
+            try {
+                const docRef = doc(db, EVENT_PATH, eventId);
+                const data = {
+                    hostUsername: hostUsername,
+                    hostRank: hostRank,
+                    eventType: eventType,
+                    hasFivePlusAttendees: hasFivePlusAttendees
+                };
+                if (eventType === 'Event') {
+                    data.eventSubType = eventDetail;
+                } else if (eventType === 'Training') {
+                    data.mapName = eventDetail;
+                }
+                await updateDoc(docRef, data);
+                console.log("Event updated successfully:", eventId);
+                return true;
+            } catch (e) {
+                console.error("Error updating event: ", e);
+                return false;
+            }
+        }
+        
         function populateOfficerDropdown() {
             const dropdown = document.getElementById('event-host-select');
             dropdown.innerHTML = '<option value="" disabled selected>Select Event Host</option>'; 
@@ -751,6 +792,27 @@
                 option.textContent = 'No officers registered.';
                 option.disabled = true;
                 dropdown.appendChild(option);
+            }
+
+            // Also populate edit-event-host dropdown if present (for edit modal)
+            const editDropdown = document.getElementById('edit-event-host');
+            if (editDropdown) {
+                editDropdown.innerHTML = '<option value="" disabled selected>Select Event Host</option>';
+                if (officerData && officerData.length > 0) {
+                    const sortedOfficers2 = [...officerData].sort((a, b) => a.username.localeCompare(b.username));
+                    sortedOfficers2.forEach(officer => {
+                        const option = document.createElement('option');
+                        option.value = `${officer.username}|${officer.rank}`;
+                        option.textContent = `${officer.username} (${officer.rank})`;
+                        editDropdown.appendChild(option);
+                    });
+                } else {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = 'No officers registered.';
+                    option.disabled = true;
+                    editDropdown.appendChild(option);
+                }
             }
         }
 
@@ -1025,8 +1087,131 @@
                 document.getElementById('post-status').textContent = `Error: Could not post announcement. ${e.message}`;
             }
         }
+        
+        // Event Edit Modal Functions - CLEAN REWRITE
+        function showEventEditModal(eventId, hostUsername, hostRank, eventType, eventDetail, hasFivePlusAttendees) {
+            console.log('showEventEditModal called with:', {eventId, hostUsername, hostRank, eventType, eventDetail, hasFivePlusAttendees});
+            
+            const modal = document.getElementById('edit-event-modal');
+            if (!modal) {
+                console.error('Modal not found!');
+                return;
+            }
 
-        // Expose functions globally for the non-module script and HTML access
+            document.getElementById('edit-event-id').value = eventId;
+            document.getElementById('edit-event-type').value = eventType;
+            document.getElementById('edit-event-five-plus-checkbox').checked = hasFivePlusAttendees;
+            document.getElementById('event-edit-status').textContent = '';
+
+            // Populate the officer dropdown
+            const editHostDropdown = document.getElementById('edit-event-host');
+            editHostDropdown.innerHTML = '<option value="" disabled>Select Event Host</option>';
+            
+            if (officerData && officerData.length > 0) {
+                const sortedOfficers = [...officerData].sort((a, b) => a.username.localeCompare(b.username));
+                sortedOfficers.forEach(officer => {
+                    const option = document.createElement('option');
+                    option.value = `${officer.username}|${officer.rank}`;
+                    option.textContent = `${officer.username} (${officer.rank})`;
+                    editHostDropdown.appendChild(option);
+                });
+            }
+
+            // Set the current host selection
+            editHostDropdown.value = `${hostUsername}|${hostRank}`;
+
+            // Generate conditional fields
+            window.updateEditEventTypeFields();
+
+            // Set detail value after a tiny delay to ensure field exists
+            setTimeout(() => {
+                const detailInput = document.getElementById('edit-event-detail-input');
+                if (detailInput) {
+                    detailInput.value = eventDetail;
+                }
+            }, 10);
+
+            // Show modal
+            modal.style.display = 'flex';
+            console.log('Modal displayed');
+        }
+
+        function hideEventEditModal() {
+            const modal = document.getElementById('edit-event-modal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        function updateEditEventTypeFields() {
+            const typeSelect = document.getElementById('edit-event-type');
+            const fieldsContainer = document.getElementById('edit-event-conditional-fields');
+            const selectedType = typeSelect.value;
+
+            fieldsContainer.innerHTML = '';
+
+            if (selectedType === 'Event') {
+                fieldsContainer.innerHTML = `
+                    <div class="input-group">
+                        <label for="edit-event-detail-input">Event Activity Type</label>
+                        <select id="edit-event-detail-input" required>
+                            <option value="">Select Activity</option>
+                            <option value="Boat Patrol">Boat Patrol</option>
+                            <option value="Plane Patrol">Plane Patrol</option>
+                            <option value="Mixed Patrol">Mixed Patrol</option>
+                            <option value="Torpedo Chaos">Torpedo Chaos</option>
+                        </select>
+                    </div>
+                `;
+            } else if (selectedType === 'Training') {
+                fieldsContainer.innerHTML = `
+                    <div class="input-group">
+                        <label for="edit-event-detail-input">Training Map Name</label>
+                        <input type="text" id="edit-event-detail-input" placeholder="e.g., Arctic Outpost, Coastal Base" required>
+                    </div>
+                `;
+            }
+        }
+
+        async function handleEventEditForm(event) {
+            event.preventDefault();
+            console.log('handleEventEditForm called');
+
+            const eventId = document.getElementById('edit-event-id').value;
+            const eventType = document.getElementById('edit-event-type').value;
+            const hasFivePlus = document.getElementById('edit-event-five-plus-checkbox').checked;
+            const selectedHost = document.getElementById('edit-event-host').value;
+            const detailInput = document.getElementById('edit-event-detail-input');
+            const statusEl = document.getElementById('event-edit-status');
+
+            if (!selectedHost || !eventType || !detailInput) {
+                statusEl.textContent = 'Error: All fields are required.';
+                return;
+            }
+
+            const eventDetail = detailInput.value.trim();
+            if (!eventDetail) {
+                statusEl.textContent = 'Error: Event detail is required.';
+                return;
+            }
+
+            const [hostUsername, hostRank] = selectedHost.split('|');
+            
+            statusEl.textContent = 'Saving...';
+            statusEl.style.color = 'var(--navy-blue)';
+
+            const success = await window.updateEvent(eventId, hostUsername, hostRank, eventType, eventDetail, hasFivePlus);
+            if (success) {
+                statusEl.textContent = 'Event updated successfully!';
+                statusEl.style.color = 'var(--success-color)';
+                setTimeout(() => {
+                    hideEventEditModal();
+                }, 1000);
+            } else {
+                statusEl.textContent = 'Error: Could not update event.';
+                statusEl.style.color = 'var(--error-color)';
+            }
+        }
         window.setupFirebase = setupFirebase;
         window.postAnnouncement = postAnnouncement;
         window.registerNewOfficer = registerNewOfficer; 
@@ -1035,6 +1220,7 @@
         window.loadOfficers = loadOfficers; 
         window.logNewEvent = logNewEvent; 
         window.deleteEvent = deleteEvent; 
+        window.updateEvent = updateEvent;
         window.loadEvents = loadEvents; 
         
         // --- NEW Exposed Recruitment Functions ---
@@ -1056,6 +1242,12 @@
         window.updateRank = updateRank;
         window.loadDefaultRanks = loadDefaultRanks;
         window.populateRankDropdowns = populateRankDropdowns;
+
+        // --- Exposed Event Edit Functions ---
+        window.showEventEditModal = showEventEditModal;
+        window.hideEventEditModal = hideEventEditModal;
+        window.handleEventEditForm = handleEventEditForm;
+        window.updateEditEventTypeFields = updateEditEventTypeFields;
     </script>
     
     <style>
@@ -1527,17 +1719,25 @@
             margin-bottom: 10px;
             padding-bottom: 5px;
             border-bottom: 1px dashed #eee;
+            gap: 15px;
         }
         .host-info {
             font-weight: bold;
             color: var(--navy-blue);
             display: flex;
             align-items: center;
-            flex-shrink: 1; /* Allow shrinking */
-            min-width: 0; /* For flex-shrink to work */
+            flex-shrink: 1;
+            flex: 1;
+            min-width: 0;
         }
         .host-info .event-type-badge {
-            flex-shrink: 0; /* Don't shrink badge */
+            flex-shrink: 0;
+        }
+        .time {
+            font-size: 0.85em;
+            color: #999;
+            white-space: nowrap;
+            flex-shrink: 0;
         }
         .event-type-badge {
             background-color: var(--navy-blue);
@@ -1547,6 +1747,15 @@
             font-size: 0.85em;
             margin-right: 10px;
             font-weight: bold;
+        }
+        .five-plus-badge {
+            background-color: var(--error-color);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin-left: 10px;
         }
         .event-detail-line {
             font-size: 1.1em;
@@ -1874,6 +2083,11 @@
                     <div id="conditional-event-fields">
                         </div>
                     
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="event-five-plus-checkbox">
+                        <label for="event-five-plus-checkbox">Event has 5+ attendees</label>
+                    </div>
+                    
                     <button type="submit">Log Event</button>
                 </form>
                 <p id="log-status"></p>
@@ -2048,7 +2262,7 @@
     <div id="edit-rank-modal" class="modal-overlay">
         <div class="modal-content">
             <h3>Edit Rank</h3>
-            <form id="edit-rank-form" onsubmit="handleEditRankForm(event)">
+            <form id="edit-rank-form" onsubmit="window.handleEditRankForm(event)">
                 <input type="hidden" id="edit-rank-id">
                 
                 <div class="input-group">
@@ -2059,7 +2273,46 @@
                 <p id="rank-edit-status"></p>
 
                 <div class="modal-buttons">
-                    <button type="button" class="cancel-btn" onclick="hideRankEditModal()">Cancel</button>
+                    <button type="button" class="cancel-btn" onclick="window.hideRankEditModal()">Cancel</button>
+                    <button type="submit" style="background-color: var(--success-color);">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Event Edit Modal -->
+    <div id="edit-event-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Edit Event Details</h3>
+            <form id="edit-event-form" onsubmit="window.handleEventEditForm(event)">
+                <input type="hidden" id="edit-event-id">
+                
+                <div class="input-group">
+                    <label for="edit-event-host">Event Host (Officer)</label>
+                    <select id="edit-event-host" required>
+                        <option value="" disabled selected>Select Event Host</option>
+                    </select>
+                </div>
+                
+                <div class="input-group">
+                    <label for="edit-event-type">Event Type Category</label>
+                    <select id="edit-event-type" onchange="window.updateEditEventTypeFields()" required>
+                        <option value="Event">Event</option>
+                        <option value="Training">Training</option>
+                    </select>
+                </div>
+
+                <div id="edit-event-conditional-fields"></div>
+                
+                <div class="checkbox-group">
+                    <input type="checkbox" id="edit-event-five-plus-checkbox">
+                    <label for="edit-event-five-plus-checkbox">Event has 5+ attendees</label>
+                </div>
+                
+                <p id="event-edit-status"></p>
+
+                <div class="modal-buttons">
+                    <button type="button" class="cancel-btn" onclick="window.hideEventEditModal()">Cancel</button>
                     <button type="submit" style="background-color: var(--success-color);">Save Changes</button>
                 </div>
             </form>
@@ -2410,6 +2663,7 @@
             const eventType = document.getElementById('event-type-select').value;
             const detailInput = document.getElementById('event-detail-input'); 
             const logStatus = document.getElementById('log-status');
+            const hasFivePlus = document.getElementById('event-five-plus-checkbox').checked;
             if (!detailInput) {
                 logStatus.textContent = 'Error: Event detail field is missing.';
                 return;
@@ -2422,7 +2676,7 @@
             }
             const [hostUsername, hostRank] = selectedHost.split('|');
             if (hostUsername.length > 0 && hostRank.length > 0 && eventType.length > 0 && eventDetail.length > 0 && window.logNewEvent) {
-                window.logNewEvent(hostUsername, hostRank, eventType, eventDetail);
+                window.logNewEvent(hostUsername, hostRank, eventType, eventDetail, hasFivePlus);
             } else {
                  logStatus.textContent = 'Error: Please fill all required fields.';
             }
