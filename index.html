@@ -628,7 +628,9 @@
                     weekHeader.className = 'week-header collapsible-header';
                     weekHeader.style.cursor = 'pointer';
                     const eventCount = eventsByWeek[weekKey].length;
-                    weekHeader.innerHTML = `<span class="collapse-icon">▶</span> <span class="week-label">Week: ${weekKey}</span><span class="total-count">${eventCount}</span>`;
+                    const fivePlusCount = eventsByWeek[weekKey].filter(e => e.hasFivePlusAttendees).length;
+                    const fivePlusHTML = fivePlusCount > 0 ? `<span class="five-plus-count">${fivePlusCount}</span>` : '';
+                    weekHeader.innerHTML = `<span class="collapse-icon">▶</span> <span class="week-label">Week: ${weekKey}</span><span class="total-count">${eventCount}</span>${fivePlusHTML}`;
                     
                     const weekContent = document.createElement('div');
                     weekContent.className = 'collapsible-content';
@@ -1719,6 +1721,16 @@
             font-size: 0.9em;
             font-weight: bold;
             white-space: nowrap;
+        }
+        .five-plus-count {
+            background-color: var(--error-color);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-weight: bold;
+            white-space: nowrap;
+            margin-left: 8px;
         }
         .event-card {
             background-color: #ffffff;
