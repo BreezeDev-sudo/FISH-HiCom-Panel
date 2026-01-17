@@ -33,6 +33,7 @@
         const OFFICER_PATH = `officers`; 
         const EVENT_PATH = `events`; 
         const RECRUITMENT_PATH = `recruitments`; // --- NEW ---
+        const RALLY_PATH = `rallies`; // --- NEW: Rally Management ---
         const LOGIN_PATH = `panel_logins`; 
         const RANKS_PATH = `ranks`; // --- NEW: Rank Management --- 
 
@@ -63,6 +64,7 @@
                         loadOfficers(); 
                         loadEvents(); 
                         loadRecruitments(); // --- NEW ---
+                        loadRallies(); // --- NEW: Rally Management ---
                     } else {
                         console.log("User signed out or failed to authenticate.");
                     }
@@ -1015,6 +1017,346 @@
             }
         }
 
+        // --- NEW: RALLY MANAGEMENT FUNCTIONS ---
+
+        function getRallyWeekStartAndEnd(date) {
+            const d = new Date(date);
+            d.setHours(0, 0, 0, 0);
+            const dayOfWeek = d.getDay();
+            const sunday = new Date(d);
+            sunday.setDate(d.getDate() - dayOfWeek);
+            const saturday = new Date(sunday);
+            saturday.setDate(sunday.getDate() + 6);
+            saturday.setHours(23, 59, 59, 999);
+            return { sunday, saturday };
+        }
+
+        function loadRallies() {
+            const ralliesList = document.getElementById('rallies-list');
+            if (!db) {
+                console.error("DB is not initialized yet in loadRallies.");
+                ralliesList.innerHTML = '<p class="text-center" style="color:red;">Database connection error. Try refreshing.</p>';
+                return;
+            }
+            populateRallyHostDropdown();
+            const ralliesCollection = collection(db, RALLY_PATH);
+            const q = query(ralliesCollection, orderBy("timestamp", "desc"));
+
+            onSnapshot(q, (snapshot) => {
+                const ralliesByWeek = {};
+                if (snapshot.empty) {
+                    ralliesList.innerHTML = '<p class="text-center">No rallies have been logged yet.</p>';
+                    return;
+                }
+                snapshot.forEach((doc) => {
+                    const rally = doc.data();
+                    const rallyDate = rally.timestamp ? rally.timestamp.toDate() : new Date();
+                    const rallyId = doc.id;
+                    const { sunday, saturday } = getRallyWeekStartAndEnd(rallyDate);
+                    const weekKey = `${sunday.toLocaleDateString()} - ${saturday.toLocaleDateString()}`;
+                    if (!ralliesByWeek[weekKey]) {
+                        ralliesByWeek[weekKey] = [];
+                    }
+                    ralliesByWeek[weekKey].push({ ...rally, id: rallyId, date: rallyDate });
+                });
+                ralliesList.innerHTML = '';
+                // Get sorted keys
+                const sortedWeekKeys = Object.keys(ralliesByWeek).sort((a, b) => new Date(b.split(' - ')[0]) - new Date(a.split(' - ')[0]));
+
+                for (const weekKey of sortedWeekKeys) {
+                    const weekContainer = document.createElement('div');
+                    weekContainer.className = 'collapsible-section';
+
+                    const weekHeader = document.createElement('h4');
+                    weekHeader.className = 'week-header collapsible-header';
+                    weekHeader.style.cursor = 'pointer';
+                    const rallyCount = ralliesByWeek[weekKey].length;
+                    weekHeader.innerHTML = `<span class="collapse-icon">▶</span> <span class="week-label">Week: ${weekKey}</span><span class="total-count">${rallyCount}</span>`;
+
+                    const weekContent = document.createElement('div');
+                    weekContent.className = 'collapsible-content';
+                    weekContent.style.display = 'none';
+
+                    // Add click listener to toggle
+                    weekHeader.addEventListener('click', () => {
+                        const isCollapsed = weekContent.style.display === 'none';
+                        weekContent.style.display = isCollapsed ? 'block' : 'none';
+                        const icon = weekHeader.querySelector('.collapse-icon');
+                        icon.textContent = isCollapsed ? '▼' : '▶';
+                    });
+
+                    weekContainer.appendChild(weekHeader);
+                    weekContainer.appendChild(weekContent);
+                    ralliesList.appendChild(weekContainer);
+
+                    // Sort rallies within the week
+                    const sortedRallies = ralliesByWeek[weekKey].sort((a, b) => b.date - a.date);
+
+                    sortedRallies.forEach(rally => {
+                        const rallyDiv = document.createElement('div');
+                        rallyDiv.className = 'rally-card';
+                        rallyDiv.style.borderLeftColor = '#9c27b0';
+                        const timestamp = rally.date.toLocaleString();
+
+                        const safeHostUsername = (rally.hostUsername || 'N/A');
+                        const safeHostRank = (rally.hostRank || 'N/A');
+                        const safeTime = (rally.rallyTime || 'N/A');
+                        const safeAttendees = (rally.attendeeCount || '0');
+                        const escapedHost = safeHostUsername.replace(/'/g, "\\'");
+                        const escapedRank = safeHostRank.replace(/'/g, "\\'");
+                        const escapedId = (rally.id || '').replace(/'/g, "\\'");
+
+                        let screenshotHTML = '';
+                        if (rally.screenshotData) {
+                            screenshotHTML = `<img src="${rally.screenshotData}" class="rally-screenshot" alt="Rally Screenshot">`;
+                        }
+
+                        rallyDiv.innerHTML = `
+                            <div class="rally-header">
+                                <span class="host-info">
+                                    <span class="rally-time-badge">${safeTime}</span>
+                                    Hosted by: ${safeHostUsername} (${safeHostRank})
+                                </span>
+                                <span class="time">${timestamp}</span>
+                                <div class="action-buttons">
+                                    <button class="edit-btn" onclick="window.showRallyEditModal('${escapedId}', '${escapedHost}', '${escapedRank}', '${safeTime}', '${safeAttendees}', '${(rally.screenshotData || '').replace(/'/g, "\\'")}')">Edit</button>
+                                    <button class="delete-btn" onclick="window.deleteRally('${escapedId}')">X</button>
+                                </div>
+                            </div>
+                            ${screenshotHTML}
+                            <div class="rally-detail-line">Attendees: ${safeAttendees}</div>
+                            <span class="logger-info">Logged by: ${rally.loggedBy}</span>
+                        `;
+                        weekContent.appendChild(rallyDiv);
+                    });
+                }
+            }, (error) => {
+                console.error("Error listening to rallies:", error);
+                ralliesList.innerHTML = '<p class="text-center" style="color:red;">Failed to retrieve rallies list.</p>';
+            });
+        }
+
+        async function logNewRally(hostUsername, hostRank, rallyTime, attendeeCount, screenshotData) {
+            if (!db) {
+                document.getElementById('log-rally-status').textContent = 'Error: Not connected to database.';
+                return;
+            }
+            document.getElementById('log-rally-status').textContent = 'Logging rally...';
+
+            const data = {
+                hostUsername: hostUsername,
+                hostRank: hostRank,
+                rallyTime: rallyTime,
+                attendeeCount: parseInt(attendeeCount) || 0,
+                screenshotData: screenshotData || null,
+                loggedBy: window.currentUsername || 'Unknown High Command',
+                timestamp: serverTimestamp()
+            };
+
+            try {
+                await addDoc(collection(db, RALLY_PATH), data);
+                document.getElementById('log-rally-status').textContent = 'Rally logged successfully! Returning to list view...';
+
+                document.getElementById('rally-host-select').value = '';
+                document.getElementById('rally-time-select').value = '';
+                document.getElementById('rally-attendees-input').value = '';
+                document.getElementById('rally-screenshot-input').value = '';
+
+                setTimeout(() => {
+                    window.hideLogRallyForm();
+                    window.openTab('rallies');
+                }, 500);
+            } catch (e) {
+                console.error("Error adding rally: ", e);
+                document.getElementById('log-rally-status').textContent = `Error: Could not log rally. ${e.message}`;
+            }
+        }
+
+        async function deleteRally(rallyId) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return;
+            }
+            const result = confirm("Are you sure you want to delete this rally log?");
+            if (result) {
+                try {
+                    const docRef = doc(db, RALLY_PATH, rallyId);
+                    await deleteDoc(docRef);
+                    console.log("Rally deleted successfully:", rallyId);
+                } catch (e) {
+                    console.error("Error deleting rally: ", e);
+                }
+            }
+        }
+
+        async function updateRally(rallyId, hostUsername, hostRank, rallyTime, attendeeCount, screenshotData) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return false;
+            }
+            try {
+                const docRef = doc(db, RALLY_PATH, rallyId);
+                await updateDoc(docRef, {
+                    hostUsername: hostUsername,
+                    hostRank: hostRank,
+                    rallyTime: rallyTime,
+                    attendeeCount: parseInt(attendeeCount) || 0,
+                    screenshotData: screenshotData || null
+                });
+                console.log("Rally updated successfully:", rallyId);
+                return true;
+            } catch (e) {
+                console.error("Error updating rally: ", e);
+                return false;
+            }
+        }
+
+        function populateRallyHostDropdown() {
+            const dropdown = document.getElementById('rally-host-select');
+            if (!dropdown) return;
+            dropdown.innerHTML = '<option value="" disabled selected>Select Rally Host</option>';
+            if (officerData && officerData.length > 0) {
+                const sortedOfficers = [...officerData].sort((a, b) => a.username.localeCompare(b.username));
+                sortedOfficers.forEach(officer => {
+                    const option = document.createElement('option');
+                    option.value = `${officer.username}|${officer.rank}`;
+                    option.textContent = `${officer.username} (${officer.rank})`;
+                    dropdown.appendChild(option);
+                });
+            } else {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No officers registered.';
+                option.disabled = true;
+                dropdown.appendChild(option);
+            }
+
+            // Also populate edit-rally-host dropdown if present
+            const editDropdown = document.getElementById('edit-rally-host');
+            if (editDropdown) {
+                editDropdown.innerHTML = '<option value="" disabled selected>Select Rally Host</option>';
+                if (officerData && officerData.length > 0) {
+                    const sortedOfficers = [...officerData].sort((a, b) => a.username.localeCompare(b.username));
+                    sortedOfficers.forEach(officer => {
+                        const option = document.createElement('option');
+                        option.value = `${officer.username}|${officer.rank}`;
+                        option.textContent = `${officer.username} (${officer.rank})`;
+                        editDropdown.appendChild(option);
+                    });
+                } else {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = 'No officers registered.';
+                    option.disabled = true;
+                    editDropdown.appendChild(option);
+                }
+            }
+        }
+
+        // Rally Edit Modal Functions
+        function showRallyEditModal(rallyId, hostUsername, hostRank, rallyTime, attendeeCount, screenshotData) {
+            const modal = document.getElementById('edit-rally-modal');
+            if (!modal) {
+                console.error('Rally edit modal not found!');
+                return;
+            }
+
+            document.getElementById('edit-rally-id').value = rallyId;
+            document.getElementById('edit-rally-time').value = rallyTime;
+            document.getElementById('edit-rally-attendees').value = attendeeCount;
+            document.getElementById('rally-edit-status').textContent = '';
+
+            // Populate the officer dropdown
+            const editHostDropdown = document.getElementById('edit-rally-host');
+            editHostDropdown.innerHTML = '<option value="" disabled>Select Rally Host</option>';
+
+            if (officerData && officerData.length > 0) {
+                const sortedOfficers = [...officerData].sort((a, b) => a.username.localeCompare(b.username));
+                sortedOfficers.forEach(officer => {
+                    const option = document.createElement('option');
+                    option.value = `${officer.username}|${officer.rank}`;
+                    option.textContent = `${officer.username} (${officer.rank})`;
+                    editHostDropdown.appendChild(option);
+                });
+            }
+
+            // Set the current host selection
+            editHostDropdown.value = `${hostUsername}|${hostRank}`;
+
+            // Store the current screenshot data
+            if (screenshotData) {
+                document.getElementById('edit-rally-screenshot-preview').innerHTML = `<img src="${screenshotData}" class="rally-screenshot-preview" alt="Current Screenshot">`;
+                document.getElementById('edit-rally-screenshot-input').value = '';
+            } else {
+                document.getElementById('edit-rally-screenshot-preview').innerHTML = '';
+                document.getElementById('edit-rally-screenshot-input').value = '';
+            }
+
+            modal.style.display = 'flex';
+        }
+
+        function hideRallyEditModal() {
+            const modal = document.getElementById('edit-rally-modal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        async function handleRallyEditForm(event) {
+            event.preventDefault();
+
+            const rallyId = document.getElementById('edit-rally-id').value;
+            const selectedHost = document.getElementById('edit-rally-host').value;
+            const rallyTime = document.getElementById('edit-rally-time').value;
+            const attendeeCount = document.getElementById('edit-rally-attendees').value;
+            const screenshotInput = document.getElementById('edit-rally-screenshot-input');
+            const statusEl = document.getElementById('rally-edit-status');
+
+            if (!selectedHost || !rallyTime || !attendeeCount) {
+                statusEl.textContent = 'Error: All fields are required.';
+                return;
+            }
+
+            const [hostUsername, hostRank] = selectedHost.split('|');
+
+            let screenshotData = null;
+            if (screenshotInput.files && screenshotInput.files.length > 0) {
+                try {
+                    const file = screenshotInput.files[0];
+                    screenshotData = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(file);
+                    });
+                } catch (e) {
+                    statusEl.textContent = 'Error: Could not read screenshot file.';
+                    return;
+                }
+            } else {
+                // Check if there's an existing image
+                const existingImg = document.getElementById('edit-rally-screenshot-preview').querySelector('img');
+                screenshotData = existingImg ? existingImg.src : null;
+            }
+
+            statusEl.textContent = 'Saving...';
+            statusEl.style.color = 'var(--navy-blue)';
+
+            const success = await window.updateRally(rallyId, hostUsername, hostRank, rallyTime, attendeeCount, screenshotData);
+            if (success) {
+                statusEl.textContent = 'Rally updated successfully!';
+                statusEl.style.color = 'var(--success-color)';
+                setTimeout(() => {
+                    hideRallyEditModal();
+                }, 1000);
+            } else {
+                statusEl.textContent = 'Error: Could not update rally.';
+                statusEl.style.color = 'var(--error-color)';
+            }
+        }
+
+        // --- END: RALLY MANAGEMENT FUNCTIONS ---
+
 
         // --- ANNOUNCEMENT MANAGEMENT FUNCTIONS (Unchanged) ---
 
@@ -1232,6 +1574,15 @@
         window.logNewRecruitment = logNewRecruitment;
         window.deleteRecruitment = deleteRecruitment;
         
+        // --- NEW: Exposed Rally Functions ---
+        window.loadRallies = loadRallies;
+        window.logNewRally = logNewRally;
+        window.deleteRally = deleteRally;
+        window.updateRally = updateRally;
+        window.showRallyEditModal = showRallyEditModal;
+        window.hideRallyEditModal = hideRallyEditModal;
+        window.handleRallyEditForm = handleRallyEditForm;
+        
         // --- Exposed Login Functions ---
         window.checkFirestoreLogin = checkFirestoreLogin;
         window.loadLogins = loadLogins;
@@ -1333,6 +1684,41 @@
             box-sizing: border-box;
             font-size: 16px;
             resize: vertical;
+        }
+
+        /* File Input Styling */
+        input[type="file"] {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            border: 2px dashed var(--accent-color);
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            cursor: pointer;
+            font-size: 14px;
+            box-sizing: border-box;
+            transition: all 0.3s ease;
+        }
+
+        input[type="file"]:hover {
+            background-color: #f0f7ff;
+            border-color: var(--button-hover-darken);
+        }
+
+        input[type="file"]::file-selector-button {
+            background-color: var(--accent-color);
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-right: 15px;
+            transition: background-color 0.3s ease;
+        }
+
+        input[type="file"]::file-selector-button:hover {
+            background-color: var(--button-hover-darken);
         }
 
         button {
@@ -1905,6 +2291,94 @@
         }
         /* --- End New Styles --- */
 
+        /* --- NEW: Rally Styles --- */
+        #rallies-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .rally-card {
+            background-color: #ffffff;
+            border: 1px solid #ddd;
+            border-left: 5px solid #9c27b0;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            text-align: left;
+        }
+        .rally-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 1px dashed #eee;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        .rally-header .host-info {
+            font-weight: bold;
+            color: var(--navy-blue);
+            display: flex;
+            align-items: center;
+            flex-shrink: 1;
+            flex: 1;
+            min-width: 0;
+            gap: 10px;
+        }
+        .rally-header .time {
+            font-size: 0.85em;
+            color: #999;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .rally-time-badge {
+            background-color: #9c27b0;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+        .rally-screenshot {
+            width: 100%;
+            max-width: 400px;
+            height: auto;
+            border-radius: 5px;
+            margin: 10px 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .rally-screenshot-preview {
+            width: 100%;
+            max-width: 200px;
+            height: auto;
+            border-radius: 5px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .rally-detail-line {
+            font-size: 1.1em;
+            margin: 5px 0 10px 0;
+            padding: 5px 0;
+            color: var(--navy-blue);
+            font-weight: 500;
+        }
+        #rally-log-form {
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            background-color: #fff;
+            margin-top: 20px;
+        }
+        #log-rally-status {
+            margin-top: 15px;
+            font-weight: bold;
+            color: var(--success-color);
+            min-height: 1.2em;
+            text-align: center;
+        }
+        /* --- End Rally Styles --- */
+
 
         /* Modal Styles */
         .modal-overlay {
@@ -1995,6 +2469,7 @@
             <button id="tab-announcements" class="tab-button" onclick="openTab('announcements')">Announcements</button>
             <button id="tab-officers" class="tab-button" onclick="openTab('officers')">Officers</button> 
             <button id="tab-events" class="tab-button" onclick="openTab('events')">Events</button> 
+            <button id="tab-rallies" class="tab-button" onclick="openTab('rallies')">Rallies</button> <!-- NEW -->
             <button id="tab-recruitments" class="tab-button" onclick="openTab('recruitments')">Recruitments</button> <!-- NEW -->
             <button id="tab-admin" class="tab-button" onclick="openTab('admin')" style="display: none;">Admin</button>
         </div>
@@ -2012,6 +2487,9 @@
                 </div>
                 <div class="home-button" onclick="showLogForm()"> 
                     Log Event
+                </div>
+                <div class="home-button" onclick="showLogRallyForm()"> <!-- NEW -->
+                    Log Rally
                 </div>
                 <div class="home-button" onclick="showLogRecruitmentForm()"> <!-- NEW -->
                     Log Recruitment
@@ -2127,6 +2605,50 @@
                 </form>
                 <p id="log-status"></p>
                 <button class="panel-header button" style="background-color: #6c757d; margin-top: 10px; max-width: 150px;" onclick="hideLogForm()">Cancel</button>
+            </div>
+
+        </div>
+        
+        <!-- --- NEW --- Rally Tab Content -->
+        <div id="rallies" class="tab-content" style="display: none;">
+            
+            <div id="rally-view-area">
+                <h3 class="text-center">Logged Rallies</h3>
+                <div id="rallies-list">
+                    <p class="text-center">Loading rally logs...</p>
+                </div>
+                <button onclick="showLogRallyForm()" style="margin-top: 20px; max-width: 300px; float: right;">Log New Rally</button>
+            </div>
+            
+            <div id="rally-log-form" style="display: none;">
+                <h3>Log New Rally</h3>
+                <form id="logRallyForm" onsubmit="handleLogRallyForm(event)">
+                    <div class="input-group">
+                        <label for="rally-host-select">Rally Host (Officer)</label>
+                        <select id="rally-host-select" required>
+                            <option value="" disabled selected>Select Rally Host</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label for="rally-time-select">Rally Time</label>
+                        <select id="rally-time-select" required>
+                            <option value="" disabled selected>Select Rally Time</option>
+                            <option value="1 AM">1 AM Rally</option>
+                            <option value="1 PM">1 PM Rally</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label for="rally-attendees-input">Number of Attendees</label>
+                        <input type="number" id="rally-attendees-input" placeholder="Enter attendee count" min="0" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="rally-screenshot-input">Upload Screenshot</label>
+                        <input type="file" id="rally-screenshot-input" accept="image/*">
+                    </div>
+                    <button type="submit">Log Rally</button>
+                </form>
+                <p id="log-rally-status"></p>
+                <button class="panel-header button" style="background-color: #6c757d; margin-top: 10px; max-width: 150px;" onclick="hideLogRallyForm()">Cancel</button>
             </div>
 
         </div>
@@ -2355,6 +2877,49 @@
     </div>
 
 
+    <!-- Rally Edit Modal -->
+    <div id="edit-rally-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Edit Rally Details</h3>
+            <form id="edit-rally-form" onsubmit="window.handleRallyEditForm(event)">
+                <input type="hidden" id="edit-rally-id">
+                
+                <div class="input-group">
+                    <label for="edit-rally-host">Rally Host (Officer)</label>
+                    <select id="edit-rally-host" required>
+                        <option value="" disabled selected>Select Rally Host</option>
+                    </select>
+                </div>
+                
+                <div class="input-group">
+                    <label for="edit-rally-time">Rally Time</label>
+                    <select id="edit-rally-time" required>
+                        <option value="1 AM">1 AM Rally</option>
+                        <option value="1 PM">1 PM Rally</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="edit-rally-attendees">Number of Attendees</label>
+                    <input type="number" id="edit-rally-attendees" placeholder="Enter attendee count" min="0" required>
+                </div>
+
+                <div class="input-group">
+                    <label for="edit-rally-screenshot-input">Update Screenshot</label>
+                    <div id="edit-rally-screenshot-preview" style="margin-bottom: 10px;"></div>
+                    <input type="file" id="edit-rally-screenshot-input" accept="image/*">
+                </div>
+                
+                <p id="rally-edit-status"></p>
+
+                <div class="modal-buttons">
+                    <button type="button" class="cancel-btn" onclick="window.hideRallyEditModal()">Cancel</button>
+                    <button type="submit" style="background-color: var(--success-color);">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script type="module">
         // Import functions exposed globally in the first script tag
         const { 
@@ -2475,6 +3040,7 @@
             hidePostForm(true);
             hideRegisterForm(true); 
             hideLogForm(true);
+            hideLogRallyForm(true); // --- NEW ---
             hideLogRecruitmentForm(true); // --- NEW ---
             hideAdminRegisterForm(true);
             
@@ -2483,6 +3049,9 @@
             }
             if (tabName === 'events') { 
                 window.loadEvents(); 
+            }
+            if (tabName === 'rallies') { // --- NEW ---
+                window.loadRallies();
             }
             if (tabName === 'recruitments') { // --- NEW ---
                 window.loadRecruitments();
@@ -2541,6 +3110,22 @@
             if (document.getElementById('events').style.display === 'block' || force) {
                 document.getElementById('event-log-form').style.display = 'none';
                 document.getElementById('event-view-area').style.display = 'block';
+            }
+        }
+        
+        // --- NEW --- Rally views
+        function showLogRallyForm() {
+            openTab('rallies'); 
+            document.getElementById('rally-view-area').style.display = 'none';
+            document.getElementById('rally-log-form').style.display = 'block';
+            document.getElementById('log-rally-status').textContent = '';
+            window.loadOfficers(true); 
+        }
+
+        function hideLogRallyForm(force = false) {
+            if (document.getElementById('rallies').style.display === 'block' || force) {
+                document.getElementById('rally-log-form').style.display = 'none';
+                document.getElementById('rally-view-area').style.display = 'block';
             }
         }
         
@@ -2717,6 +3302,42 @@
             }
         }
         
+        // --- NEW --- Form submission handler for Rallies
+        function handleLogRallyForm(event) {
+            event.preventDefault();
+            const hostSelect = document.getElementById('rally-host-select');
+            const rallyTime = document.getElementById('rally-time-select').value;
+            const attendeeCount = document.getElementById('rally-attendees-input').value;
+            const screenshotInput = document.getElementById('rally-screenshot-input');
+            const statusEl = document.getElementById('log-rally-status');
+
+            const selectedHost = hostSelect.value;
+            if (!selectedHost || !rallyTime || !attendeeCount) {
+                statusEl.textContent = 'Error: Please fill all required fields.';
+                return;
+            }
+
+            const [hostUsername, hostRank] = selectedHost.split('|');
+
+            // Handle screenshot
+            if (screenshotInput.files && screenshotInput.files.length > 0) {
+                const file = screenshotInput.files[0];
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const screenshotData = e.target.result;
+                    if (window.logNewRally) {
+                        window.logNewRally(hostUsername, hostRank, rallyTime, attendeeCount, screenshotData);
+                    }
+                };
+                reader.readAsDataURL(file);
+            } else {
+                // No screenshot provided, log with null
+                if (window.logNewRally) {
+                    window.logNewRally(hostUsername, hostRank, rallyTime, attendeeCount, null);
+                }
+            }
+        }
+        
         // --- NEW --- Form submission handler for Recruitments
         function handleLogRecruitmentForm(event) {
             event.preventDefault();
@@ -2829,6 +3450,9 @@
         window.handleEditForm = handleEditForm;
         
         // --- NEW Exposed Functions ---
+        window.showLogRallyForm = showLogRallyForm;
+        window.hideLogRallyForm = hideLogRallyForm;
+        window.handleLogRallyForm = handleLogRallyForm;
         window.showLogRecruitmentForm = showLogRecruitmentForm;
         window.hideLogRecruitmentForm = hideLogRecruitmentForm;
         window.handleLogRecruitmentForm = handleLogRecruitmentForm;
