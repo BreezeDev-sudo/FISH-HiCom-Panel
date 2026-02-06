@@ -1,0 +1,3514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fish Legion High Command Panel</title>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        // Import updateDoc for editing and new functions for login query
+        import { getFirestore, collection, onSnapshot, query, orderBy, serverTimestamp, addDoc, limit, doc, deleteDoc, updateDoc, getDocs, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
+
+        // --- MANDATORY FIREBASE ENVIRONMENT VARIABLES ---
+        // These variables are injected by the Canvas platform for collaborative apps.
+        const appId = "1:69804423705:web:f155e8eecfa34c8a4e0888"
+        const firebaseConfig = {
+          apiKey: "AIzaSyALuA1aEeGCILi8aqI960Youp_0OdcZyRo",
+          authDomain: "fish-hicom-panel.firebaseapp.com",
+          projectId: "fish-hicom-panel",
+          storageBucket: "fish-hicom-panel.firebasestorage.app",
+          messagingSenderId: "69804423705",
+          appId: "1:69804423705:web:f155e8eecfa34c8a4e0888"
+        };
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        let db, auth;
+        let userId = null;
+        let officerData = []; // Store officer data for event host dropdown
+
+        // Firebase Collection Paths
+        const ANNOUNCEMENT_PATH = `announcements`; 
+        const OFFICER_PATH = `officers`; 
+        const EVENT_PATH = `events`; 
+        const RECRUITMENT_PATH = `recruitments`; // --- NEW ---
+        const RALLY_PATH = `rallies`; // --- NEW: Rally Management ---
+        const LOGIN_PATH = `panel_logins`; 
+        const RANKS_PATH = `ranks`; // --- NEW: Rank Management --- 
+
+        // Function to set up Firebase services and authentication
+        async function setupFirebase() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                const signInPromise = initialAuthToken 
+                    ? signInWithCustomToken(auth, initialAuthToken)
+                    : signInAnonymously(auth);
+
+                // Wait for sign-in to complete
+                await signInPromise;
+                
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        window.currentUserId = userId; // Expose userId globally
+                        console.log(`Firebase Auth Complete. User ID: ${userId}`);
+                        
+                        await seedInitialLogins();
+                        
+                        // Load all necessary data when ready
+                        loadAnnouncements(); 
+                        loadOfficers(); 
+                        loadEvents(); 
+                        loadRecruitments(); // --- NEW ---
+                        loadRallies(); // --- NEW: Rally Management ---
+                    } else {
+                        console.log("User signed out or failed to authenticate.");
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase initialization failed:", error);
+                const errorElement = document.getElementById('announcements-list');
+                if(errorElement) errorElement.innerHTML = '<p class="text-center" style="color:red;">Error: Database setup failed.</p>';
+            }
+        }
+        
+        // --- LOGIN MANAGEMENT FUNCTIONS ---
+
+        // Seed the database with the original hardcoded logins if it's empty
+        async function seedInitialLogins() {
+            if (!db) return;
+            try {
+                const loginsCollection = collection(db, LOGIN_PATH);
+                const snapshot = await getDocs(query(loginsCollection, limit(1)));
+                
+                if (snapshot.empty) {
+                    console.log("Seeding initial panel logins...");
+                    const initialLogins = {
+                        "0breezedev": "Archon127&",
+                        "Fierce__Fish": "ViceAdmiral127&",
+                        "Lost_Player": "Admiral127&",
+                        "Gl1tch_4ce": "FleetAdmiral127&",
+                        "archon": "archon_pass_123" 
+                    };
+                    
+                    for (const [username, password] of Object.entries(initialLogins)) {
+                        await addDoc(loginsCollection, {
+                            username: username,
+                            password: password, 
+                            timestamp: serverTimestamp()
+                        });
+                    }
+                    console.log("Initial logins seeded successfully.");
+                }
+            } catch (e) {
+                console.error("Error seeding logins: ", e);
+            }
+        }
+
+        // Check credentials against Firestore
+        async function checkFirestoreLogin(username, password) {
+            if (!db) {
+                console.error("DB not initialized for login check.");
+                return false;
+            }
+            
+            try {
+                const q = query(collection(db, LOGIN_PATH), where("username", "==", username));
+                const querySnapshot = await getDocs(q);
+                
+                if (querySnapshot.empty) {
+                    console.log("Login failed: User not found.");
+                    return false; 
+                }
+                
+                const userData = querySnapshot.docs[0].data();
+                
+                if (userData.password === password) {
+                    console.log("Login successful.");
+                    return true; 
+                } else {
+                    console.log("Login failed: Invalid password.");
+                    return false; 
+                }
+            } catch (e) {
+                console.error("Error checking login: ", e);
+                return false;
+            }
+        }
+
+        // REAL-TIME LOGIN LIST LOADER (for Admin tab)
+        function loadLogins() {
+            const adminList = document.getElementById('admin-list');
+            
+            if (!db) {
+                console.error("DB is not initialized yet in loadLogins.");
+                adminList.innerHTML = '<p class="text-center" style="color:red;">Database connection error. Try refreshing.</p>';
+                return;
+            }
+
+            const loginsCollection = collection(db, LOGIN_PATH);
+            const q = query(loginsCollection, orderBy("timestamp", "desc")); 
+
+            onSnapshot(q, (snapshot) => {
+                adminList.innerHTML = '<div class="login-card header-row"><span>Username</span><span>Password</span><span>Action</span></div>';
+
+                if (snapshot.empty) {
+                    adminList.innerHTML += '<p class="text-center" style="grid-column: 1 / -1; margin-top: 15px;">No logins registered yet.</p>';
+                    return;
+                }
+                
+                snapshot.forEach((doc) => {
+                    const login = doc.data();
+                    const loginId = doc.id;
+                    
+                    const loginDiv = document.createElement('div');
+                    loginDiv.className = 'login-card';
+                    const safeUsername = login.username || 'N/A';
+                    const safePassword = login.password ? '*********' : 'N/A';
+                    
+                    const escapedUsername = safeUsername.replace(/'/g, "\\'");
+                    const escapedPassword = (login.password || '').replace(/'/g, "\\'");
+
+                    loginDiv.innerHTML = `
+                        <span class="username">${safeUsername}</span>
+                        <span class="rank">${safePassword}</span>
+                        <div class="action-buttons">
+                            <button class="edit-btn" onclick="window.showAdminEditModal('${loginId}', '${escapedUsername}', '${escapedPassword}')">Edit</button>
+                            <button class="delete-btn" onclick="window.deleteLogin('${loginId}')">X</button>
+                        </div>
+                    `;
+                    adminList.appendChild(loginDiv);
+                });
+
+            }, (error) => {
+                console.error("Error listening to logins:", error);
+                adminList.innerHTML = '<p class="text-center" style="color:red;">Failed to retrieve login list.</p>';
+            });
+        }
+
+        // ADD NEW LOGIN FUNCTION
+        async function registerNewLogin(username, password) {
+            if (!db) {
+                document.getElementById('admin-register-status').textContent = 'Error: Not connected to database.';
+                return;
+            }
+            document.getElementById('admin-register-status').textContent = 'Registering login...';
+
+            try {
+                await addDoc(collection(db, LOGIN_PATH), {
+                    username: username, 
+                    password: password,
+                    timestamp: serverTimestamp() 
+                });
+
+                document.getElementById('admin-register-status').textContent = 'Login registered successfully!';
+                
+                document.getElementById('admin-username-input').value = '';
+                document.getElementById('admin-password-input').value = '';
+                
+                setTimeout(() => {
+                    window.hideAdminRegisterForm(); 
+                }, 500); 
+
+            } catch (e) {
+                console.error("Error adding login: ", e);
+                document.getElementById('admin-register-status').textContent = `Error: Could not register login. ${e.message}`;
+            }
+        }
+
+        // DELETE LOGIN FUNCTION
+        async function deleteLogin(loginId) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return;
+            }
+            
+            const loginsCollection = collection(db, LOGIN_PATH);
+            const snapshot = await getDocs(loginsCollection);
+            if (snapshot.size <= 1) {
+                 console.error("Cannot delete the last login. You will be locked out.");
+                 return;
+            }
+
+            const result = confirm("Are you sure you want to delete this panel login?");
+            if (result) {
+                try {
+                    const docRef = doc(db, LOGIN_PATH, loginId);
+                    await deleteDoc(docRef);
+                    console.log("Login deleted successfully:", loginId);
+                } catch (e) {
+                    console.error("Error deleting login: ", e);
+                }
+            }
+        }
+
+        // UPDATE LOGIN FUNCTION
+        async function updateLogin(loginId, newUsername, newPassword) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return false;
+            }
+            
+            try {
+                const docRef = doc(db, LOGIN_PATH, loginId);
+                await updateDoc(docRef, {
+                    username: newUsername,
+                    password: newPassword
+                });
+                console.log("Login updated successfully:", loginId);
+                return true;
+            } catch (e) {
+                console.error("Error updating login: ", e);
+                return false;
+            }
+        }
+
+        // --- RANK MANAGEMENT FUNCTIONS (NEW) ---
+
+        // LOAD ALL RANKS
+        function loadRanks() {
+            const ranksList = document.getElementById('ranks-list');
+            if (!db) {
+                console.error("DB is not initialized yet in loadRanks.");
+                ranksList.innerHTML = '<p class="text-center" style="color:red;">Database connection error. Try refreshing.</p>';
+                return;
+            }
+            
+            const ranksCollection = collection(db, RANKS_PATH);
+            const q = query(ranksCollection, orderBy("order", "asc"));
+            
+            onSnapshot(q, (snapshot) => {
+                ranksList.innerHTML = '';
+                
+                if (snapshot.empty) {
+                    ranksList.innerHTML = '<p class="text-center">No ranks have been added yet.</p>';
+                    return;
+                }
+                
+                // Add header row
+                const headerDiv = document.createElement('div');
+                headerDiv.className = 'rank-card header-row';
+                headerDiv.innerHTML = `<span>Rank Name</span><span>Actions</span>`;
+                ranksList.appendChild(headerDiv);
+                
+                snapshot.forEach((doc) => {
+                    const rank = doc.data();
+                    const rankId = doc.id;
+                    
+                    const rankDiv = document.createElement('div');
+                    rankDiv.className = 'rank-card';
+                    rankDiv.innerHTML = `
+                        <span>${rank.name}</span>
+                        <div class="action-buttons">
+                            <button class="edit-btn" onclick="window.showRankEditModal('${rankId}', '${rank.name.replace(/'/g, "\\'")}')">Edit</button>
+                            <button class="delete-btn" onclick="window.deleteRank('${rankId}')">X</button>
+                        </div>
+                    `;
+                    ranksList.appendChild(rankDiv);
+                });
+            }, (error) => {
+                console.error("Error listening to ranks:", error);
+                ranksList.innerHTML = '<p class="text-center" style="color:red;">Failed to retrieve ranks list.</p>';
+            });
+        }
+
+        // ADD NEW RANK
+        async function addNewRank(rankName) {
+            if (!db) {
+                document.getElementById('rank-add-status').textContent = 'Error: Not connected to database.';
+                return;
+            }
+            
+            if (!rankName || rankName.trim().length === 0) {
+                document.getElementById('rank-add-status').textContent = 'Error: Rank name cannot be empty.';
+                return;
+            }
+            
+            document.getElementById('rank-add-status').textContent = 'Adding rank...';
+            
+            try {
+                // Get the current count to set order
+                const snapshot = await getDocs(collection(db, RANKS_PATH));
+                const order = snapshot.size;
+                
+                await addDoc(collection(db, RANKS_PATH), {
+                    name: rankName.trim(),
+                    order: order,
+                    createdBy: window.currentUsername || 'Unknown',
+                    timestamp: serverTimestamp()
+                });
+                
+                document.getElementById('rank-add-status').textContent = 'Rank added successfully!';
+                document.getElementById('rank-name-input').value = '';
+                
+                setTimeout(() => {
+                    document.getElementById('rank-add-status').textContent = '';
+                }, 2000);
+            } catch (e) {
+                console.error("Error adding rank: ", e);
+                document.getElementById('rank-add-status').textContent = `Error: Could not add rank. ${e.message}`;
+            }
+        }
+
+        // DELETE RANK
+        async function deleteRank(rankId) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return;
+            }
+            const result = confirm("Are you sure you want to delete this rank?");
+            if (result) {
+                try {
+                    const docRef = doc(db, RANKS_PATH, rankId);
+                    await deleteDoc(docRef);
+                    console.log("Rank deleted successfully:", rankId);
+                } catch (e) {
+                    console.error("Error deleting rank: ", e);
+                    alert('Error deleting rank: ' + e.message);
+                }
+            }
+        }
+
+        // UPDATE RANK
+        async function updateRank(rankId, newRankName) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return false;
+            }
+            try {
+                const docRef = doc(db, RANKS_PATH, rankId);
+                await updateDoc(docRef, {
+                    name: newRankName
+                });
+                console.log("Rank updated successfully:", rankId);
+                return true;
+            } catch (e) {
+                console.error("Error updating rank: ", e);
+                return false;
+            }
+        }
+
+        // LOAD DEFAULT RANKS
+        async function loadDefaultRanks() {
+            if (!db) {
+                alert('Database is not initialized.');
+                return;
+            }
+            
+            const result = confirm('This will add all default ranks to the system. Continue?');
+            if (!result) return;
+            
+            const defaultRanks = [
+                'Junior Shark',
+                'Reef Shark',
+                'Hammerhead Shark',
+                'Megalodon',
+                'Reef Guardian',
+                'Guardian',
+                'Hero',
+                'Angel',
+                'Marshal',
+                'Treasurer of FISH',
+                'Profishien',
+                'Angler',
+                'Fishing Overseer',
+                'Archon'
+            ];
+            
+            try {
+                let addCount = 0;
+                const ranksCollection = collection(db, RANKS_PATH);
+                const snapshot = await getDocs(ranksCollection);
+                
+                for (let i = 0; i < defaultRanks.length; i++) {
+                    const rankName = defaultRanks[i];
+                    
+                    // Check if rank already exists
+                    const existingRank = snapshot.docs.find(doc => doc.data().name === rankName);
+                    if (!existingRank) {
+                        await addDoc(ranksCollection, {
+                            name: rankName,
+                            order: i,
+                            createdBy: window.currentUsername || 'System',
+                            timestamp: serverTimestamp()
+                        });
+                        addCount++;
+                    }
+                }
+                
+                alert(`Successfully added ${addCount} rank(s) to the system.`);
+                window.loadRanks();
+            } catch (e) {
+                console.error('Error loading default ranks:', e);
+                alert('Error loading default ranks: ' + e.message);
+            }
+        }
+
+        // --- WEBHOOK ENDPOINT FOR DISCORD BOT ---
+        
+        // Function to receive webhook data from Discord bot
+        async function receiveDiscordEvent(eventData) {
+            if (!db) {
+                console.error("DB not initialized for webhook");
+                return { success: false, error: "Database not initialized" };
+            }
+            
+            try {
+                // Map Discord event data to your website's event format
+                const data = {
+                    hostUsername: eventData.hostUsername,
+                    hostRank: eventData.hostRank,
+                    eventType: eventData.eventType,
+                    hasFivePlusAttendees: eventData.hasFivePlusAttendees || false,
+                    loggedBy: eventData.loggedBy || 'Discord Bot',
+                    timestamp: serverTimestamp()
+                };
+                
+                // Add type-specific data
+                if (eventData.eventType === 'Event') {
+                    data.eventSubType = eventData.eventDetail;
+                } else if (eventData.eventType === 'Training') {
+                    data.mapName = eventData.eventDetail;
+                }
+                
+                await addDoc(collection(db, EVENT_PATH), data);
+                console.log("Discord event logged successfully to website");
+                return { success: true };
+            } catch (e) {
+                console.error("Error logging Discord event:", e);
+                return { success: false, error: e.message };
+            }
+        }
+        
+        window.receiveDiscordEvent = receiveDiscordEvent;
+
+        // --- OFFICER MANAGEMENT FUNCTIONS (Unchanged) ---
+        
+        // REAL-TIME OFFICER LOADER 
+        function loadOfficers(forDropdown = false) {
+            const officersList = document.getElementById('officers-list');
+            
+            if (!db) {
+                console.error("DB is not initialized yet in loadOfficers.");
+                if (!forDropdown) officersList.innerHTML = '<p class="text-center" style="color:red;">Database connection error. Try refreshing.</p>';
+                return;
+            }
+
+            const officersCollection = collection(db, OFFICER_PATH);
+            const q = query(officersCollection, orderBy("timestamp", "desc")); 
+
+            onSnapshot(q, (snapshot) => {
+                officerData = []; 
+                
+                if (!forDropdown) {
+                    officersList.innerHTML = '<div class="officer-card header-row"><span>Username</span><span>In-Game Rank</span><span>Action</span></div>';
+                    if (snapshot.empty) {
+                        officersList.innerHTML += '<p class="text-center" style="grid-column: 1 / -1; margin-top: 15px;">No officers registered yet.</p>';
+                        return;
+                    }
+                }
+                
+                snapshot.forEach((doc) => {
+                    const officer = doc.data();
+                    const officerId = doc.id;
+                    officerData.push({ username: officer.username, rank: officer.rank });
+
+                    if (!forDropdown) {
+                        const officerDiv = document.createElement('div');
+                        officerDiv.className = 'officer-card';
+                        const safeUsername = officer.username || 'N/A';
+                        const safeRank = officer.rank || 'N/A';
+                        const escapedUsername = safeUsername.replace(/'/g, "\\'");
+                        const escapedRank = safeRank.replace(/'/g, "\\'");
+
+                        officerDiv.innerHTML = `
+                            <span class="username">${safeUsername}</span>
+                            <span class="rank">${safeRank}</span>
+                            <div class="action-buttons">
+                                <button class="edit-btn" onclick="window.showEditModal('${officerId}', '${escapedUsername}', '${escapedRank}')">Edit</button>
+                                <button class="delete-btn" onclick="window.deleteOfficer('${officerId}')">X</button>
+                            </div>
+                        `;
+                        officersList.appendChild(officerDiv);
+                    }
+                });
+                
+                if (forDropdown) {
+                    populateOfficerDropdown();
+                }
+
+            }, (error) => {
+                console.error("Error listening to officers:", error);
+                if (!forDropdown) officersList.innerHTML = '<p class="text-center" style="color:red;">Failed to retrieve officer list.</p>';
+            });
+        }
+
+        // NEW OFFICER REGISTRATION FUNCTION
+        async function registerNewOfficer(username, rank) {
+            if (!db) {
+                document.getElementById('register-status').textContent = 'Error: Not connected to database.';
+                return;
+            }
+            document.getElementById('register-status').textContent = 'Registering officer...';
+
+            try {
+                await addDoc(collection(db, OFFICER_PATH), {
+                    username: username, 
+                    rank: rank,
+                    registeredBy: window.currentUsername || 'Unknown High Command',
+                    timestamp: serverTimestamp() 
+                });
+                document.getElementById('register-status').textContent = 'Officer registered successfully! Returning to list view...';
+                document.getElementById('officer-username-input').value = '';
+                document.getElementById('officer-rank-input').value = '';
+                setTimeout(() => {
+                    window.hideRegisterForm(); 
+                    window.openTab('officers'); 
+                }, 500); 
+            } catch (e) {
+                console.error("Error adding officer: ", e);
+                document.getElementById('register-status').textContent = `Error: Could not register officer. ${e.message}`;
+            }
+        }
+
+        // DELETE OFFICER FUNCTION
+        async function deleteOfficer(officerId) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return;
+            }
+            const result = confirm("Are you sure you want to delete this officer from the roster?");
+            if (result) {
+                try {
+                    const docRef = doc(db, OFFICER_PATH, officerId);
+                    await deleteDoc(docRef);
+                    console.log("Officer deleted successfully:", officerId);
+                } catch (e) {
+                    console.error("Error deleting officer: ", e);
+                }
+            }
+        }
+
+        // UPDATE OFFICER FUNCTION
+        async function updateOfficer(officerId, newUsername, newRank) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return false;
+            }
+            try {
+                const docRef = doc(db, OFFICER_PATH, officerId);
+                await updateDoc(docRef, {
+                    username: newUsername,
+                    rank: newRank
+                });
+                console.log("Officer updated successfully:", officerId);
+                return true;
+            } catch (e) {
+                console.error("Error updating officer: ", e);
+                return false;
+            }
+        }
+        
+        // --- EVENT MANAGEMENT FUNCTIONS (Unchanged) ---
+
+        function getEventWeekStartAndEnd(date) {
+            const d = new Date(date);
+            d.setHours(0, 0, 0, 0);
+            const dayOfWeek = d.getDay();
+            const sunday = new Date(d);
+            sunday.setDate(d.getDate() - dayOfWeek);
+            const saturday = new Date(sunday);
+            saturday.setDate(sunday.getDate() + 6);
+            saturday.setHours(23, 59, 59, 999); 
+            return { sunday, saturday };
+        }
+
+        function loadEvents() {
+            const eventsList = document.getElementById('events-list');
+            if (!db) {
+                console.error("DB is not initialized yet in loadEvents.");
+                eventsList.innerHTML = '<p class="text-center" style="color:red;">Database connection error. Try refreshing.</p>';
+                return;
+            }
+            populateOfficerDropdown();
+            const eventsCollection = collection(db, EVENT_PATH);
+            const q = query(eventsCollection, orderBy("timestamp", "desc")); 
+
+            onSnapshot(q, (snapshot) => {
+                const eventsByWeek = {};
+                if (snapshot.empty) {
+                    eventsList.innerHTML = '<p class="text-center">No events have been logged yet.</p>';
+                    return;
+                }
+                snapshot.forEach((doc) => {
+                    const event = doc.data();
+                    const eventDate = event.timestamp ? event.timestamp.toDate() : new Date();
+                    const eventId = doc.id;
+                    const { sunday, saturday } = getEventWeekStartAndEnd(eventDate);
+                    const weekKey = `${sunday.toLocaleDateString()} - ${saturday.toLocaleDateString()}`;
+                    if (!eventsByWeek[weekKey]) {
+                        eventsByWeek[weekKey] = [];
+                    }
+                    eventsByWeek[weekKey].push({ ...event, id: eventId, date: eventDate });
+                });
+                eventsList.innerHTML = '';
+                // Get sorted keys
+                const sortedWeekKeys = Object.keys(eventsByWeek).sort((a, b) => new Date(b.split(' - ')[0]) - new Date(a.split(' - ')[0]));
+
+                for (const weekKey of sortedWeekKeys) {
+                    const weekContainer = document.createElement('div');
+                    weekContainer.className = 'collapsible-section';
+                    
+                    const weekHeader = document.createElement('h4');
+                    weekHeader.className = 'week-header collapsible-header';
+                    weekHeader.style.cursor = 'pointer';
+                    const eventCount = eventsByWeek[weekKey].length;
+                    const fivePlusCount = eventsByWeek[weekKey].filter(e => e.hasFivePlusAttendees).length;
+                    const fivePlusHTML = fivePlusCount > 0 ? `<span class="five-plus-count">${fivePlusCount}</span>` : '';
+                    weekHeader.innerHTML = `<span class="collapse-icon">▶</span> <span class="week-label">Week: ${weekKey}</span><span class="total-count">${eventCount}</span>${fivePlusHTML}`;
+                    
+                    const weekContent = document.createElement('div');
+                    weekContent.className = 'collapsible-content';
+                    weekContent.style.display = 'none';
+                    
+                    // Add click listener to toggle
+                    weekHeader.addEventListener('click', () => {
+                        const isCollapsed = weekContent.style.display === 'none';
+                        weekContent.style.display = isCollapsed ? 'block' : 'none';
+                        const icon = weekHeader.querySelector('.collapse-icon');
+                        icon.textContent = isCollapsed ? '▼' : '▶';
+                    });
+                    
+                    weekContainer.appendChild(weekHeader);
+                    weekContainer.appendChild(weekContent);
+                    eventsList.appendChild(weekContainer);
+                    
+                    // Sort events within the week
+                    const sortedEvents = eventsByWeek[weekKey].sort((a, b) => b.date - a.date);
+
+                    sortedEvents.forEach(event => {
+                        const eventDiv = document.createElement('div');
+                        eventDiv.className = 'event-card';
+                        const timestamp = event.date.toLocaleString();
+                        
+                        let mainDetail = '';
+                        if (event.eventType === 'Event' && event.eventSubType) {
+                            mainDetail = `Activity: ${event.eventSubType}`;
+                            eventDiv.style.borderLeftColor = 'var(--accent-color)';
+                        } else if (event.eventType === 'Training' && event.mapName) {
+                            mainDetail = `Map: ${event.mapName}`;
+                            eventDiv.style.borderLeftColor = 'var(--error-color)';
+                        } else {
+                            mainDetail = 'No specific detail recorded';
+                            eventDiv.style.borderLeftColor = '#999';
+                        }
+                        const fivePlusBadge = event.hasFivePlusAttendees ? '<span class="five-plus-badge">5+</span>' : '';
+                        const safeHostUsername = (event.hostUsername || 'N/A');
+                        const safeHostRank = (event.hostRank || 'N/A');
+                        const safeType = (event.eventType || '').replace(/'/g, "\\'");
+                        const safeDetail = (event.eventSubType || event.mapName || '').replace(/'/g, "\\'");
+                        const escapedHost = safeHostUsername.replace(/'/g, "\\'");
+                        const escapedRank = safeHostRank.replace(/'/g, "\\'");
+                        const escapedId = (event.id || '').replace(/'/g, "\\'");
+
+                        eventDiv.innerHTML = `
+                            <div class="event-header">
+                                <span class="host-info">
+                                    <span class="event-type-badge">${event.eventType}</span>
+                                    Hosted by: ${safeHostUsername} (${safeHostRank})
+                                    ${fivePlusBadge}
+                                </span>
+                                <span class="time">${timestamp}</span>
+                                <div class="action-buttons">
+                                    <button class="edit-btn" onclick="window.showEventEditModal('${escapedId}', '${escapedHost}', '${escapedRank}', '${safeType}', '${safeDetail}', ${event.hasFivePlusAttendees || false})">Edit</button>
+                                    <button class="delete-btn" onclick="window.deleteEvent('${escapedId}')">X</button>
+                                </div>
+                            </div>
+                            <div class="event-detail-line">${mainDetail}</div>
+                            <span class="logger-info">Logged by: ${event.loggedBy}</span>
+                        `;
+                        weekContent.appendChild(eventDiv);
+                    });
+                }
+            }, (error) => {
+                console.error("Error listening to events:", error);
+                eventsList.innerHTML = '<p class="text-center" style="color:red;">Failed to retrieve events list.</p>';
+            });
+        }
+        
+        async function logNewEvent(hostUsername, hostRank, eventType, eventDetail, hasFivePlusAttendees) {
+            if (!db) {
+                document.getElementById('log-status').textContent = 'Error: Not connected to database.';
+                return;
+            }
+            document.getElementById('log-status').textContent = 'Logging event...';
+            const data = {
+                hostUsername: hostUsername, 
+                hostRank: hostRank,
+                eventType: eventType,
+                hasFivePlusAttendees: hasFivePlusAttendees || false,
+                loggedBy: window.currentUsername || 'Unknown High Command',
+                timestamp: serverTimestamp() 
+            };
+            if (eventType === 'Event') {
+                data.eventSubType = eventDetail;
+            } else if (eventType === 'Training') {
+                data.mapName = eventDetail;
+            }
+            try {
+                await addDoc(collection(db, EVENT_PATH), data);
+                document.getElementById('log-status').textContent = 'Event logged successfully! Returning to list view...';
+                setTimeout(() => {
+                    window.hideLogForm(); 
+                    window.openTab('events'); 
+                }, 500); 
+            } catch (e) {
+                console.error("Error adding event: ", e);
+                document.getElementById('log-status').textContent = `Error: Could not log event. ${e.message}`;
+            }
+        }
+        
+        async function deleteEvent(eventId) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return;
+            }
+            const result = confirm("Are you sure you want to delete this event log?");
+            if (result) {
+                try {
+                    const docRef = doc(db, EVENT_PATH, eventId);
+                    await deleteDoc(docRef);
+                    console.log("Event deleted successfully:", eventId);
+                } catch (e) {
+                    console.error("Error deleting event: ", e);
+                }
+            }
+        }
+        
+        async function updateEvent(eventId, hostUsername, hostRank, eventType, eventDetail, hasFivePlusAttendees) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return false;
+            }
+            try {
+                const docRef = doc(db, EVENT_PATH, eventId);
+                const data = {
+                    hostUsername: hostUsername,
+                    hostRank: hostRank,
+                    eventType: eventType,
+                    hasFivePlusAttendees: hasFivePlusAttendees
+                };
+                if (eventType === 'Event') {
+                    data.eventSubType = eventDetail;
+                } else if (eventType === 'Training') {
+                    data.mapName = eventDetail;
+                }
+                await updateDoc(docRef, data);
+                console.log("Event updated successfully:", eventId);
+                return true;
+            } catch (e) {
+                console.error("Error updating event: ", e);
+                return false;
+            }
+        }
+        
+        function populateOfficerDropdown() {
+            const dropdown = document.getElementById('event-host-select');
+            dropdown.innerHTML = '<option value="" disabled selected>Select Event Host</option>'; 
+            if (officerData && officerData.length > 0) {
+                // Sort officers alphabetically
+                const sortedOfficers = [...officerData].sort((a, b) => a.username.localeCompare(b.username));
+                sortedOfficers.forEach(officer => {
+                    const option = document.createElement('option');
+                    option.value = `${officer.username}|${officer.rank}`;
+                    option.textContent = `${officer.username} (${officer.rank})`;
+                    dropdown.appendChild(option);
+                });
+            } else {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No officers registered.';
+                option.disabled = true;
+                dropdown.appendChild(option);
+            }
+
+            // Also populate edit-event-host dropdown if present (for edit modal)
+            const editDropdown = document.getElementById('edit-event-host');
+            if (editDropdown) {
+                editDropdown.innerHTML = '<option value="" disabled selected>Select Event Host</option>';
+                if (officerData && officerData.length > 0) {
+                    const sortedOfficers2 = [...officerData].sort((a, b) => a.username.localeCompare(b.username));
+                    sortedOfficers2.forEach(officer => {
+                        const option = document.createElement('option');
+                        option.value = `${officer.username}|${officer.rank}`;
+                        option.textContent = `${officer.username} (${officer.rank})`;
+                        editDropdown.appendChild(option);
+                    });
+                } else {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = 'No officers registered.';
+                    option.disabled = true;
+                    editDropdown.appendChild(option);
+                }
+            }
+        }
+
+        // POPULATE RANK DROPDOWNS FROM FIRESTORE
+        async function populateRankDropdowns() {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return;
+            }
+            
+            try {
+                const ranksCollection = collection(db, RANKS_PATH);
+                const q = query(ranksCollection, orderBy("order", "asc"));
+                const snapshot = await getDocs(q);
+                
+                const ranks = [];
+                snapshot.forEach((doc) => {
+                    ranks.push(doc.data().name);
+                });
+                
+                // Update officer registration dropdown
+                const registerDropdown = document.getElementById('officer-rank-input');
+                if (registerDropdown) {
+                    registerDropdown.innerHTML = '<option value="" disabled selected>Select a rank</option>';
+                    ranks.forEach(rank => {
+                        const option = document.createElement('option');
+                        option.value = rank;
+                        option.textContent = rank;
+                        registerDropdown.appendChild(option);
+                    });
+                }
+                
+                // Update officer edit modal dropdown
+                const editDropdown = document.getElementById('edit-officer-rank');
+                if (editDropdown) {
+                    editDropdown.innerHTML = '<option value="" disabled>Select a rank</option>';
+                    ranks.forEach(rank => {
+                        const option = document.createElement('option');
+                        option.value = rank;
+                        option.textContent = rank;
+                        editDropdown.appendChild(option);
+                    });
+                }
+            } catch (e) {
+                console.error("Error populating rank dropdowns:", e);
+            }
+        }
+
+        
+        // --- NEW: RECRUITMENT MANAGEMENT FUNCTIONS ---
+
+        function loadRecruitments() {
+            const recruitmentsList = document.getElementById('recruitments-list');
+            if (!db) {
+                console.error("DB is not initialized yet in loadRecruitments.");
+                recruitmentsList.innerHTML = '<p class="text-center" style="color:red;">Database connection error. Try refreshing.</p>';
+                return;
+            }
+            const recruitmentsCollection = collection(db, RECRUITMENT_PATH);
+            const q = query(recruitmentsCollection, orderBy("timestamp", "desc")); 
+
+            onSnapshot(q, (snapshot) => {
+                const recruitmentsByMonth = {};
+                if (snapshot.empty) {
+                    recruitmentsList.innerHTML = '<p class="text-center">No recruitments have been logged yet.</p>';
+                    return;
+                }
+                snapshot.forEach((doc) => {
+                    const rec = doc.data();
+                    const recDate = rec.timestamp ? rec.timestamp.toDate() : new Date();
+                    const recId = doc.id;
+                    
+                    // Format to "Month Year" e.g., "November 2025"
+                    const monthKey = recDate.toLocaleString('default', { month: 'long', year: 'numeric' });
+                    
+                    if (!recruitmentsByMonth[monthKey]) {
+                        recruitmentsByMonth[monthKey] = [];
+                    }
+                    recruitmentsByMonth[monthKey].push({ ...rec, id: recId, date: recDate });
+                });
+                
+                recruitmentsList.innerHTML = '';
+                
+                // Get sorted keys (months)
+                const sortedMonthKeys = Object.keys(recruitmentsByMonth).sort((a, b) => {
+                    const dateA = new Date(a);
+                    const dateB = new Date(b);
+                    return dateB - dateA; // Sort descending
+                });
+
+                for (const monthKey of sortedMonthKeys) {
+                    const monthContainer = document.createElement('div');
+                    monthContainer.className = 'collapsible-section';
+                    
+                    const monthHeader = document.createElement('h4');
+                    monthHeader.className = 'month-header collapsible-header';
+                    monthHeader.style.cursor = 'pointer';
+                    const recruitmentCount = recruitmentsByMonth[monthKey].length;
+                    monthHeader.innerHTML = `<span class="collapse-icon">▶</span> <span class="month-label">${monthKey}</span><span class="total-count">${recruitmentCount}</span>`;
+                    
+                    const monthContent = document.createElement('div');
+                    monthContent.className = 'collapsible-content';
+                    monthContent.style.display = 'none';
+                    
+                    // Add click listener to toggle
+                    monthHeader.addEventListener('click', () => {
+                        const isCollapsed = monthContent.style.display === 'none';
+                        monthContent.style.display = isCollapsed ? 'block' : 'none';
+                        const icon = monthHeader.querySelector('.collapse-icon');
+                        icon.textContent = isCollapsed ? '▼' : '▶';
+                    });
+                    
+                    monthContainer.appendChild(monthHeader);
+                    monthContainer.appendChild(monthContent);
+                    recruitmentsList.appendChild(monthContainer);
+                    
+                    // Events are already sorted by timestamp (desc) from the query
+                    recruitmentsByMonth[monthKey].forEach(rec => {
+                        const recDiv = document.createElement('div');
+                        recDiv.className = 'recruitment-card'; // Use new class
+                        const timestamp = rec.date.toLocaleString();
+                        
+                        const discordStatus = rec.inDiscord 
+                            ? '<span class="discord-status-yes">In Discord</span>' 
+                            : '<span class="discord-status-no">Not in Discord</span>';
+
+                        recDiv.innerHTML = `
+                            <div class="recruitment-header">
+                                <span class="recruiter-info">
+                                    Recruiter: ${rec.recruiterUsername}
+                                </span>
+                                <span class="time">${timestamp}</span>
+                                <button class="delete-btn" onclick="window.deleteRecruitment('${rec.id}')">X</button>
+                            </div>
+                            <div class="recruit-info-line">
+                                Recruited: <span class="recruit-username">${rec.recruitUsername}</span>
+                                ${discordStatus}
+                            </div>
+                            <span class="logger-info">Logged by: ${rec.loggedBy}</span>
+                        `;
+                        monthContent.appendChild(recDiv);
+                    });
+                }
+            }, (error) => {
+                console.error("Error listening to recruitments:", error);
+                recruitmentsList.innerHTML = '<p class="text-center" style="color:red;">Failed to retrieve recruitment list.</p>';
+            });
+        }
+
+        async function logNewRecruitment(recruiterUsername, recruitUsername, inDiscord) {
+            if (!db) {
+                document.getElementById('log-recruitment-status').textContent = 'Error: Not connected to database.';
+                return;
+            }
+            document.getElementById('log-recruitment-status').textContent = 'Logging recruitment...';
+            
+            const data = {
+                recruiterUsername: recruiterUsername, 
+                recruitUsername: recruitUsername,
+                inDiscord: inDiscord,
+                loggedBy: window.currentUsername || 'Unknown High Command',
+                timestamp: serverTimestamp() 
+            };
+            
+            try {
+                await addDoc(collection(db, RECRUITMENT_PATH), data);
+                document.getElementById('log-recruitment-status').textContent = 'Recruitment logged successfully! Returning to list view...';
+                
+                document.getElementById('recruiter-username-input').value = '';
+                document.getElementById('recruit-username-input').value = '';
+                document.getElementById('recruit-discord-checkbox').checked = false;
+
+                setTimeout(() => {
+                    window.hideLogRecruitmentForm(); 
+                    window.openTab('recruitments'); 
+                }, 500); 
+            } catch (e) {
+                console.error("Error adding recruitment: ", e);
+                document.getElementById('log-recruitment-status').textContent = `Error: Could not log recruitment. ${e.message}`;
+            }
+        }
+
+        async function deleteRecruitment(recruitmentId) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return;
+            }
+            const result = confirm("Are you sure you want to delete this recruitment log?");
+            if (result) {
+                try {
+                    const docRef = doc(db, RECRUITMENT_PATH, recruitmentId);
+                    await deleteDoc(docRef);
+                    console.log("Recruitment deleted successfully:", recruitmentId);
+                } catch (e) {
+                    console.error("Error deleting recruitment: ", e);
+                }
+            }
+        }
+
+        // --- NEW: RALLY MANAGEMENT FUNCTIONS ---
+
+        function getRallyWeekStartAndEnd(date) {
+            const d = new Date(date);
+            d.setHours(0, 0, 0, 0);
+            const dayOfWeek = d.getDay();
+            const sunday = new Date(d);
+            sunday.setDate(d.getDate() - dayOfWeek);
+            const saturday = new Date(sunday);
+            saturday.setDate(sunday.getDate() + 6);
+            saturday.setHours(23, 59, 59, 999);
+            return { sunday, saturday };
+        }
+
+        function loadRallies() {
+            const ralliesList = document.getElementById('rallies-list');
+            if (!db) {
+                console.error("DB is not initialized yet in loadRallies.");
+                ralliesList.innerHTML = '<p class="text-center" style="color:red;">Database connection error. Try refreshing.</p>';
+                return;
+            }
+            populateRallyHostDropdown();
+            const ralliesCollection = collection(db, RALLY_PATH);
+            const q = query(ralliesCollection, orderBy("timestamp", "desc"));
+
+            onSnapshot(q, (snapshot) => {
+                const ralliesByWeek = {};
+                if (snapshot.empty) {
+                    ralliesList.innerHTML = '<p class="text-center">No rallies have been logged yet.</p>';
+                    return;
+                }
+                snapshot.forEach((doc) => {
+                    const rally = doc.data();
+                    const rallyDate = rally.timestamp ? rally.timestamp.toDate() : new Date();
+                    const rallyId = doc.id;
+                    const { sunday, saturday } = getRallyWeekStartAndEnd(rallyDate);
+                    const weekKey = `${sunday.toLocaleDateString()} - ${saturday.toLocaleDateString()}`;
+                    if (!ralliesByWeek[weekKey]) {
+                        ralliesByWeek[weekKey] = [];
+                    }
+                    ralliesByWeek[weekKey].push({ ...rally, id: rallyId, date: rallyDate });
+                });
+                ralliesList.innerHTML = '';
+                // Get sorted keys
+                const sortedWeekKeys = Object.keys(ralliesByWeek).sort((a, b) => new Date(b.split(' - ')[0]) - new Date(a.split(' - ')[0]));
+
+                for (const weekKey of sortedWeekKeys) {
+                    const weekContainer = document.createElement('div');
+                    weekContainer.className = 'collapsible-section';
+
+                    const weekHeader = document.createElement('h4');
+                    weekHeader.className = 'week-header collapsible-header';
+                    weekHeader.style.cursor = 'pointer';
+                    const rallyCount = ralliesByWeek[weekKey].length;
+                    weekHeader.innerHTML = `<span class="collapse-icon">▶</span> <span class="week-label">Week: ${weekKey}</span><span class="total-count">${rallyCount}</span>`;
+
+                    const weekContent = document.createElement('div');
+                    weekContent.className = 'collapsible-content';
+                    weekContent.style.display = 'none';
+
+                    // Add click listener to toggle
+                    weekHeader.addEventListener('click', () => {
+                        const isCollapsed = weekContent.style.display === 'none';
+                        weekContent.style.display = isCollapsed ? 'block' : 'none';
+                        const icon = weekHeader.querySelector('.collapse-icon');
+                        icon.textContent = isCollapsed ? '▼' : '▶';
+                    });
+
+                    weekContainer.appendChild(weekHeader);
+                    weekContainer.appendChild(weekContent);
+                    ralliesList.appendChild(weekContainer);
+
+                    // Sort rallies within the week
+                    const sortedRallies = ralliesByWeek[weekKey].sort((a, b) => b.date - a.date);
+
+                    sortedRallies.forEach(rally => {
+                        const rallyDiv = document.createElement('div');
+                        rallyDiv.className = 'rally-card';
+                        rallyDiv.style.borderLeftColor = '#9c27b0';
+                        const timestamp = rally.date.toLocaleString();
+
+                        const safeHostUsername = (rally.hostUsername || 'N/A');
+                        const safeHostRank = (rally.hostRank || 'N/A');
+                        const safeTime = (rally.rallyTime || 'N/A');
+                        const safeAttendees = (rally.attendeeCount || '0');
+                        const escapedHost = safeHostUsername.replace(/'/g, "\\'");
+                        const escapedRank = safeHostRank.replace(/'/g, "\\'");
+                        const escapedId = (rally.id || '').replace(/'/g, "\\'");
+
+                        let screenshotHTML = '';
+                        if (rally.screenshotData) {
+                            screenshotHTML = `<img src="${rally.screenshotData}" class="rally-screenshot" alt="Rally Screenshot">`;
+                        }
+
+                        rallyDiv.innerHTML = `
+                            <div class="rally-header">
+                                <span class="host-info">
+                                    <span class="rally-time-badge">${safeTime}</span>
+                                    Hosted by: ${safeHostUsername} (${safeHostRank})
+                                </span>
+                                <span class="time">${timestamp}</span>
+                                <div class="action-buttons">
+                                    <button class="edit-btn" onclick="window.showRallyEditModal('${escapedId}', '${escapedHost}', '${escapedRank}', '${safeTime}', '${safeAttendees}', '${(rally.screenshotData || '').replace(/'/g, "\\'")}')">Edit</button>
+                                    <button class="delete-btn" onclick="window.deleteRally('${escapedId}')">X</button>
+                                </div>
+                            </div>
+                            ${screenshotHTML}
+                            <div class="rally-detail-line">Attendees: ${safeAttendees}</div>
+                            <span class="logger-info">Logged by: ${rally.loggedBy}</span>
+                        `;
+                        weekContent.appendChild(rallyDiv);
+                    });
+                }
+            }, (error) => {
+                console.error("Error listening to rallies:", error);
+                ralliesList.innerHTML = '<p class="text-center" style="color:red;">Failed to retrieve rallies list.</p>';
+            });
+        }
+
+        async function logNewRally(hostUsername, hostRank, rallyTime, attendeeCount, screenshotData) {
+            if (!db) {
+                document.getElementById('log-rally-status').textContent = 'Error: Not connected to database.';
+                return;
+            }
+            document.getElementById('log-rally-status').textContent = 'Logging rally...';
+
+            const data = {
+                hostUsername: hostUsername,
+                hostRank: hostRank,
+                rallyTime: rallyTime,
+                attendeeCount: parseInt(attendeeCount) || 0,
+                screenshotData: screenshotData || null,
+                loggedBy: window.currentUsername || 'Unknown High Command',
+                timestamp: serverTimestamp()
+            };
+
+            try {
+                await addDoc(collection(db, RALLY_PATH), data);
+                document.getElementById('log-rally-status').textContent = 'Rally logged successfully! Returning to list view...';
+
+                document.getElementById('rally-host-select').value = '';
+                document.getElementById('rally-time-select').value = '';
+                document.getElementById('rally-attendees-input').value = '';
+                document.getElementById('rally-screenshot-input').value = '';
+
+                setTimeout(() => {
+                    window.hideLogRallyForm();
+                    window.openTab('rallies');
+                }, 500);
+            } catch (e) {
+                console.error("Error adding rally: ", e);
+                document.getElementById('log-rally-status').textContent = `Error: Could not log rally. ${e.message}`;
+            }
+        }
+
+        async function deleteRally(rallyId) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return;
+            }
+            const result = confirm("Are you sure you want to delete this rally log?");
+            if (result) {
+                try {
+                    const docRef = doc(db, RALLY_PATH, rallyId);
+                    await deleteDoc(docRef);
+                    console.log("Rally deleted successfully:", rallyId);
+                } catch (e) {
+                    console.error("Error deleting rally: ", e);
+                }
+            }
+        }
+
+        async function updateRally(rallyId, hostUsername, hostRank, rallyTime, attendeeCount, screenshotData) {
+            if (!db) {
+                console.error("DB is not initialized.");
+                return false;
+            }
+            try {
+                const docRef = doc(db, RALLY_PATH, rallyId);
+                await updateDoc(docRef, {
+                    hostUsername: hostUsername,
+                    hostRank: hostRank,
+                    rallyTime: rallyTime,
+                    attendeeCount: parseInt(attendeeCount) || 0,
+                    screenshotData: screenshotData || null
+                });
+                console.log("Rally updated successfully:", rallyId);
+                return true;
+            } catch (e) {
+                console.error("Error updating rally: ", e);
+                return false;
+            }
+        }
+
+        function populateRallyHostDropdown() {
+            const dropdown = document.getElementById('rally-host-select');
+            if (!dropdown) return;
+            dropdown.innerHTML = '<option value="" disabled selected>Select Rally Host</option>';
+            if (officerData && officerData.length > 0) {
+                const sortedOfficers = [...officerData].sort((a, b) => a.username.localeCompare(b.username));
+                sortedOfficers.forEach(officer => {
+                    const option = document.createElement('option');
+                    option.value = `${officer.username}|${officer.rank}`;
+                    option.textContent = `${officer.username} (${officer.rank})`;
+                    dropdown.appendChild(option);
+                });
+            } else {
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No officers registered.';
+                option.disabled = true;
+                dropdown.appendChild(option);
+            }
+
+            // Also populate edit-rally-host dropdown if present
+            const editDropdown = document.getElementById('edit-rally-host');
+            if (editDropdown) {
+                editDropdown.innerHTML = '<option value="" disabled selected>Select Rally Host</option>';
+                if (officerData && officerData.length > 0) {
+                    const sortedOfficers = [...officerData].sort((a, b) => a.username.localeCompare(b.username));
+                    sortedOfficers.forEach(officer => {
+                        const option = document.createElement('option');
+                        option.value = `${officer.username}|${officer.rank}`;
+                        option.textContent = `${officer.username} (${officer.rank})`;
+                        editDropdown.appendChild(option);
+                    });
+                } else {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = 'No officers registered.';
+                    option.disabled = true;
+                    editDropdown.appendChild(option);
+                }
+            }
+        }
+
+        // Rally Edit Modal Functions
+        function showRallyEditModal(rallyId, hostUsername, hostRank, rallyTime, attendeeCount, screenshotData) {
+            const modal = document.getElementById('edit-rally-modal');
+            if (!modal) {
+                console.error('Rally edit modal not found!');
+                return;
+            }
+
+            document.getElementById('edit-rally-id').value = rallyId;
+            document.getElementById('edit-rally-time').value = rallyTime;
+            document.getElementById('edit-rally-attendees').value = attendeeCount;
+            document.getElementById('rally-edit-status').textContent = '';
+
+            // Populate the officer dropdown
+            const editHostDropdown = document.getElementById('edit-rally-host');
+            editHostDropdown.innerHTML = '<option value="" disabled>Select Rally Host</option>';
+
+            if (officerData && officerData.length > 0) {
+                const sortedOfficers = [...officerData].sort((a, b) => a.username.localeCompare(b.username));
+                sortedOfficers.forEach(officer => {
+                    const option = document.createElement('option');
+                    option.value = `${officer.username}|${officer.rank}`;
+                    option.textContent = `${officer.username} (${officer.rank})`;
+                    editHostDropdown.appendChild(option);
+                });
+            }
+
+            // Set the current host selection
+            editHostDropdown.value = `${hostUsername}|${hostRank}`;
+
+            // Store the current screenshot data
+            if (screenshotData) {
+                document.getElementById('edit-rally-screenshot-preview').innerHTML = `<img src="${screenshotData}" class="rally-screenshot-preview" alt="Current Screenshot">`;
+                document.getElementById('edit-rally-screenshot-input').value = '';
+            } else {
+                document.getElementById('edit-rally-screenshot-preview').innerHTML = '';
+                document.getElementById('edit-rally-screenshot-input').value = '';
+            }
+
+            modal.style.display = 'flex';
+        }
+
+        function hideRallyEditModal() {
+            const modal = document.getElementById('edit-rally-modal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        async function handleRallyEditForm(event) {
+            event.preventDefault();
+
+            const rallyId = document.getElementById('edit-rally-id').value;
+            const selectedHost = document.getElementById('edit-rally-host').value;
+            const rallyTime = document.getElementById('edit-rally-time').value;
+            const attendeeCount = document.getElementById('edit-rally-attendees').value;
+            const screenshotInput = document.getElementById('edit-rally-screenshot-input');
+            const statusEl = document.getElementById('rally-edit-status');
+
+            if (!selectedHost || !rallyTime || !attendeeCount) {
+                statusEl.textContent = 'Error: All fields are required.';
+                return;
+            }
+
+            const [hostUsername, hostRank] = selectedHost.split('|');
+
+            let screenshotData = null;
+            if (screenshotInput.files && screenshotInput.files.length > 0) {
+                try {
+                    const file = screenshotInput.files[0];
+                    screenshotData = await new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => resolve(e.target.result);
+                        reader.onerror = reject;
+                        reader.readAsDataURL(file);
+                    });
+                } catch (e) {
+                    statusEl.textContent = 'Error: Could not read screenshot file.';
+                    return;
+                }
+            } else {
+                // Check if there's an existing image
+                const existingImg = document.getElementById('edit-rally-screenshot-preview').querySelector('img');
+                screenshotData = existingImg ? existingImg.src : null;
+            }
+
+            statusEl.textContent = 'Saving...';
+            statusEl.style.color = 'var(--navy-blue)';
+
+            const success = await window.updateRally(rallyId, hostUsername, hostRank, rallyTime, attendeeCount, screenshotData);
+            if (success) {
+                statusEl.textContent = 'Rally updated successfully!';
+                statusEl.style.color = 'var(--success-color)';
+                setTimeout(() => {
+                    hideRallyEditModal();
+                }, 1000);
+            } else {
+                statusEl.textContent = 'Error: Could not update rally.';
+                statusEl.style.color = 'var(--error-color)';
+            }
+        }
+
+        // --- END: RALLY MANAGEMENT FUNCTIONS ---
+
+
+        // --- ANNOUNCEMENT MANAGEMENT FUNCTIONS (Unchanged) ---
+
+        function loadAnnouncements() {
+            if (!db) {
+                console.error("DB is not initialized yet in loadAnnouncements.");
+                return;
+            }
+            const announcementsCollection = collection(db, ANNOUNCEMENT_PATH);
+            const q = query(announcementsCollection, orderBy("timestamp", "desc"), limit(20));
+            onSnapshot(q, (snapshot) => {
+                const announcementsList = document.getElementById('announcements-list');
+                announcementsList.innerHTML = ''; 
+                if (snapshot.empty) {
+                    announcementsList.innerHTML = '<p class="text-center">No announcements have been made yet.</p>';
+                    return;
+                }
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    const timestamp = data.timestamp ? new Date(data.timestamp.toDate()).toLocaleString() : 'N/A';
+                    const announcementDiv = document.createElement('div');
+                    announcementDiv.className = 'announcement-card';
+                    announcementDiv.innerHTML = `
+                        <div class="card-header">
+                            <span class="sender">${data.senderUsername || 'Unknown'}</span>
+                            <span class="time">${timestamp}</span>
+                        </div>
+                        <p class="content">${data.content}</p>
+                        <span class="rank-indicator">${data.senderRank || 'High Command'}</span>
+                    `;
+                    announcementDiv.style.borderColor = data.senderRank === 'Fleet Admiral' ? 'var(--accent-color)' : '#ddd';
+                    announcementsList.appendChild(announcementDiv);
+                });
+            }, (error) => {
+                console.error("Error listening to announcements:", error);
+                const errorElement = document.getElementById('announcements-list');
+                if(errorElement) errorElement.innerHTML = '<p class="text-center" style="color:red;">Failed to retrieve announcements.</p>';
+            });
+        }
+
+        async function postAnnouncement(content) {
+            const user = window.currentUsername; 
+            if (!db || !user) {
+                document.getElementById('post-status').textContent = 'Error: Not connected to database or user not logged in.';
+                return;
+            }
+            document.getElementById('post-status').textContent = 'Posting announcement...';
+
+            try {
+                let rank = 'High Command';
+                if (user === '0breezedev') rank = 'Archon'; 
+                else if (user === 'Fierce__Fish') rank = 'Vice Admiral'; 
+                else if (user === 'Lost_Player') rank = 'Admiral'; 
+                else if (user === 'Gl1tch_4ce') rank = 'Fleet Admiral'; 
+                else if (user === 'archon') rank = 'Archon';
+
+                await addDoc(collection(db, ANNOUNCEMENT_PATH), {
+                    content: content,
+                    senderUsername: user, 
+                    senderRank: rank,
+                    timestamp: serverTimestamp() 
+                });
+
+                document.getElementById('post-status').textContent = 'Announcement posted successfully!';
+                document.getElementById('announcement-input').value = '';
+                
+                setTimeout(() => {
+                    window.hidePostForm(); 
+                    window.openTab('announcements'); 
+                }, 500);
+
+            } catch (e) {
+                console.error("Error adding document: ", e);
+                document.getElementById('post-status').textContent = `Error: Could not post announcement. ${e.message}`;
+            }
+        }
+        
+        // Event Edit Modal Functions - CLEAN REWRITE
+        function showEventEditModal(eventId, hostUsername, hostRank, eventType, eventDetail, hasFivePlusAttendees) {
+            console.log('showEventEditModal called with:', {eventId, hostUsername, hostRank, eventType, eventDetail, hasFivePlusAttendees});
+            
+            const modal = document.getElementById('edit-event-modal');
+            if (!modal) {
+                console.error('Modal not found!');
+                return;
+            }
+
+            document.getElementById('edit-event-id').value = eventId;
+            document.getElementById('edit-event-type').value = eventType;
+            document.getElementById('edit-event-five-plus-checkbox').checked = hasFivePlusAttendees;
+            document.getElementById('event-edit-status').textContent = '';
+
+            // Populate the officer dropdown
+            const editHostDropdown = document.getElementById('edit-event-host');
+            editHostDropdown.innerHTML = '<option value="" disabled>Select Event Host</option>';
+            
+            if (officerData && officerData.length > 0) {
+                const sortedOfficers = [...officerData].sort((a, b) => a.username.localeCompare(b.username));
+                sortedOfficers.forEach(officer => {
+                    const option = document.createElement('option');
+                    option.value = `${officer.username}|${officer.rank}`;
+                    option.textContent = `${officer.username} (${officer.rank})`;
+                    editHostDropdown.appendChild(option);
+                });
+            }
+
+            // Set the current host selection
+            editHostDropdown.value = `${hostUsername}|${hostRank}`;
+
+            // Generate conditional fields
+            window.updateEditEventTypeFields();
+
+            // Set detail value after a tiny delay to ensure field exists
+            setTimeout(() => {
+                const detailInput = document.getElementById('edit-event-detail-input');
+                if (detailInput) {
+                    detailInput.value = eventDetail;
+                }
+            }, 10);
+
+            // Show modal
+            modal.style.display = 'flex';
+            console.log('Modal displayed');
+        }
+
+        function hideEventEditModal() {
+            const modal = document.getElementById('edit-event-modal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        function updateEditEventTypeFields() {
+            const typeSelect = document.getElementById('edit-event-type');
+            const fieldsContainer = document.getElementById('edit-event-conditional-fields');
+            const selectedType = typeSelect.value;
+
+            fieldsContainer.innerHTML = '';
+
+            if (selectedType === 'Event') {
+                fieldsContainer.innerHTML = `
+                    <div class="input-group">
+                        <label for="edit-event-detail-input">Event Activity Type</label>
+                        <select id="edit-event-detail-input" required>
+                            <option value="">Select Activity</option>
+                            <option value="Boat Patrol">Boat Patrol</option>
+                            <option value="Plane Patrol">Plane Patrol</option>
+                            <option value="Mixed Patrol">Mixed Patrol</option>
+                            <option value="Torpedo Chaos">Torpedo Chaos</option>
+                        </select>
+                    </div>
+                `;
+            } else if (selectedType === 'Training') {
+                fieldsContainer.innerHTML = `
+                    <div class="input-group">
+                        <label for="edit-event-detail-input">Training Map Name</label>
+                        <input type="text" id="edit-event-detail-input" placeholder="e.g., Arctic Outpost, Coastal Base" required>
+                    </div>
+                `;
+            }
+        }
+
+        async function handleEventEditForm(event) {
+            event.preventDefault();
+            console.log('handleEventEditForm called');
+
+            const eventId = document.getElementById('edit-event-id').value;
+            const eventType = document.getElementById('edit-event-type').value;
+            const hasFivePlus = document.getElementById('edit-event-five-plus-checkbox').checked;
+            const selectedHost = document.getElementById('edit-event-host').value;
+            const detailInput = document.getElementById('edit-event-detail-input');
+            const statusEl = document.getElementById('event-edit-status');
+
+            if (!selectedHost || !eventType || !detailInput) {
+                statusEl.textContent = 'Error: All fields are required.';
+                return;
+            }
+
+            const eventDetail = detailInput.value.trim();
+            if (!eventDetail) {
+                statusEl.textContent = 'Error: Event detail is required.';
+                return;
+            }
+
+            const [hostUsername, hostRank] = selectedHost.split('|');
+            
+            statusEl.textContent = 'Saving...';
+            statusEl.style.color = 'var(--navy-blue)';
+
+            const success = await window.updateEvent(eventId, hostUsername, hostRank, eventType, eventDetail, hasFivePlus);
+            if (success) {
+                statusEl.textContent = 'Event updated successfully!';
+                statusEl.style.color = 'var(--success-color)';
+                setTimeout(() => {
+                    hideEventEditModal();
+                }, 1000);
+            } else {
+                statusEl.textContent = 'Error: Could not update event.';
+                statusEl.style.color = 'var(--error-color)';
+            }
+        }
+        window.setupFirebase = setupFirebase;
+        window.postAnnouncement = postAnnouncement;
+        window.registerNewOfficer = registerNewOfficer; 
+        window.deleteOfficer = deleteOfficer; 
+        window.updateOfficer = updateOfficer; 
+        window.loadOfficers = loadOfficers; 
+        window.logNewEvent = logNewEvent; 
+        window.deleteEvent = deleteEvent; 
+        window.updateEvent = updateEvent;
+        window.loadEvents = loadEvents; 
+        
+        // --- NEW Exposed Recruitment Functions ---
+        window.loadRecruitments = loadRecruitments;
+        window.logNewRecruitment = logNewRecruitment;
+        window.deleteRecruitment = deleteRecruitment;
+        
+        // --- NEW: Exposed Rally Functions ---
+        window.loadRallies = loadRallies;
+        window.logNewRally = logNewRally;
+        window.deleteRally = deleteRally;
+        window.updateRally = updateRally;
+        window.showRallyEditModal = showRallyEditModal;
+        window.hideRallyEditModal = hideRallyEditModal;
+        window.handleRallyEditForm = handleRallyEditForm;
+        
+        // --- Exposed Login Functions ---
+        window.checkFirestoreLogin = checkFirestoreLogin;
+        window.loadLogins = loadLogins;
+        window.registerNewLogin = registerNewLogin;
+        window.deleteLogin = deleteLogin;
+        window.updateLogin = updateLogin;
+        
+        // --- Exposed Rank Management Functions ---
+        window.loadRanks = loadRanks;
+        window.addNewRank = addNewRank;
+        window.deleteRank = deleteRank;
+        window.updateRank = updateRank;
+        window.loadDefaultRanks = loadDefaultRanks;
+        window.populateRankDropdowns = populateRankDropdowns;
+
+        // --- Exposed Event Edit Functions ---
+        window.showEventEditModal = showEventEditModal;
+        window.hideEventEditModal = hideEventEditModal;
+        window.handleEventEditForm = handleEventEditForm;
+        window.updateEditEventTypeFields = updateEditEventTypeFields;
+    </script>
+    
+    <style>
+        :root {
+            --navy-blue: #001f3f;
+            --light-gray: #f4f4f4;
+            --text-color: #333;
+            --accent-color: #007bff; 
+            --error-color: #dc3545;
+            --panel-bg: #e0e6ec;
+            --tab-inactive: #c8d1db;
+            --tab-active: #ffffff;
+            --button-hover-darken: #0056b3;
+            --success-color: #28a745;
+            --edit-color: #17a2b8;
+            --edit-hover-color: #117a8b;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--navy-blue);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box; /* Added for better sizing */
+        }
+
+        .container {
+            background-color: var(--light-gray);
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+            width: 100%;
+            max-width: 900px; /* Increased from 800px to give more room */
+            text-align: center;
+            color: var(--text-color);
+            box-sizing: border-box; /* Added for better sizing */
+        }
+
+        #login-box {
+            max-width: 400px; 
+            padding: 30px; 
+        }
+
+        h1 {
+            color: var(--navy-blue);
+            margin-bottom: 5px;
+            font-size: 24px;
+        }
+
+        p {
+            margin-bottom: 25px;
+            color: #666;
+        }
+
+        .input-group {
+            text-align: left;
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: var(--navy-blue);
+        }
+
+        input[type="text"], 
+        input[type="password"],
+        textarea,
+        select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            box-sizing: border-box;
+            font-size: 16px;
+            resize: vertical;
+        }
+
+        /* File Input Styling */
+        input[type="file"] {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            border: 2px dashed var(--accent-color);
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            cursor: pointer;
+            font-size: 14px;
+            box-sizing: border-box;
+            transition: all 0.3s ease;
+        }
+
+        input[type="file"]:hover {
+            background-color: #f0f7ff;
+            border-color: var(--button-hover-darken);
+        }
+
+        input[type="file"]::file-selector-button {
+            background-color: var(--accent-color);
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-right: 15px;
+            transition: background-color 0.3s ease;
+        }
+
+        input[type="file"]::file-selector-button:hover {
+            background-color: var(--button-hover-darken);
+        }
+
+        button {
+            background-color: var(--accent-color);
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            width: 100%;
+            transition: background-color 0.3s ease;
+            margin-top: 10px;
+        }
+
+        button:hover {
+            background-color: var(--button-hover-darken);
+        }
+
+        .error-text {
+            color: var(--error-color);
+            margin-top: 15px;
+            font-weight: bold;
+            height: 1.2em;
+        }
+
+        /* Main Panel Styling */
+        #main-panel {
+            background-color: var(--panel-bg);
+            border-left: 5px solid var(--accent-color);
+            padding: 0; 
+            text-align: left; 
+        }
+
+        .panel-header {
+            background-color: var(--navy-blue);
+            color: white;
+            padding: 20px 40px;
+            font-size: 28px;
+            font-weight: bold;
+            border-top-left-radius: 10px;
+            border-top-right-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .panel-header button { 
+            width: auto;
+            margin: 0;
+            padding: 8px 15px;
+            background-color: #dc3545; 
+            font-size: 14px;
+        }
+
+        /* Tab Navigation */
+        .tabs {
+            display: flex;
+            flex-wrap: nowrap; /* Changed from 'wrap' to 'nowrap' to force horizontal stacking */
+            background-color: #e9ecef;
+            border-bottom: 1px solid #dee2e6;
+            padding: 0 40px;
+            overflow-x: auto; /* Add horizontal scroll just in case */
+        }
+
+        .tab-button {
+            padding: 15px 20px; /* Slightly reduced padding */
+            cursor: pointer;
+            border: none;
+            background-color: var(--tab-inactive);
+            color: var(--navy-blue);
+            font-weight: bold;
+            font-size: 15px; /* Slightly reduced font size */
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+            margin-right: 5px;
+            transition: background-color 0.3s ease, color 0.3s ease;
+            white-space: nowrap; /* Keep text on one line */
+        }
+
+        .tab-button.active {
+            background-color: var(--tab-active);
+            border-bottom: 1px solid var(--tab-active); 
+            color: var(--accent-color);
+            box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
+        }
+
+        .tab-content {
+            padding: 30px 40px;
+            background-color: var(--tab-active); 
+            border-bottom-left-radius: 10px;
+            border-bottom-right-radius: 10px;
+        }
+
+        /* Home Tab Grid */
+        .home-buttons-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .home-button {
+            background-color: var(--navy-blue); 
+            color: white;
+            padding: 30px 20px;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: bold;
+            text-align: center;
+            cursor: pointer;
+            transition: transform 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            border-bottom: 4px solid var(--accent-color); 
+            width: auto; 
+            margin: 0;
+        }
+
+        .home-button:hover {
+            background-color: #003366; 
+            transform: translateY(-3px); 
+            box-shadow: 0 8px 15px rgba(0,0,0,0.3);
+            border-bottom: 4px solid var(--button-hover-darken);
+        }
+
+        .home-button.important {
+            background-color: var(--success-color); 
+            border-bottom-color: #218838;
+        }
+        .home-button.important:hover {
+            background-color: #218838;
+            border-bottom-color: #1e7e34;
+        }
+
+        /* Announcement Card Styling */
+        #announcements-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .announcement-card {
+            background-color: #ffffff;
+            border-left: 5px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            text-align: left;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 1px dashed #eee;
+        }
+        .sender {
+            font-weight: bold;
+            color: var(--navy-blue);
+        }
+        .time {
+            font-size: 0.85em;
+            color: #999;
+            white-space: nowrap; /* Prevent time from wrapping */
+            padding-left: 10px; /* Add space */
+        }
+        .rank-indicator {
+            display: block;
+            text-align: right;
+            font-size: 0.75em;
+            color: var(--accent-color);
+            margin-top: 5px;
+            font-style: italic;
+        }
+
+
+        /* Officer List Styles */
+        #officers-list {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+        .officer-card {
+            display: grid;
+            grid-template-columns: 2fr 1.5fr 110px; 
+            align-items: center;
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 5px;
+            border-bottom: 1px solid #eee;
+            font-size: 1.1em;
+            text-align: left;
+        }
+        .officer-card.header-row {
+            font-weight: bold;
+            background-color: var(--navy-blue);
+            color: white;
+            border-radius: 5px 5px 0 0;
+            padding: 10px 15px;
+            margin-bottom: 10px;
+            border-bottom: none;
+            grid-template-columns: 2fr 1.5fr 110px; 
+        }
+        .officer-card:last-of-type {
+            border-bottom: none;
+        }
+        
+        /* Panel Login List Styles */
+        #admin-list {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+        .login-card {
+            display: grid;
+            grid-template-columns: 2fr 1.5fr 110px; 
+            align-items: center;
+            padding: 10px;
+            background-color: #fff;
+            border-radius: 5px;
+            border-bottom: 1px solid #eee;
+            font-size: 1.1em;
+            text-align: left;
+        }
+        .login-card.header-row {
+            font-weight: bold;
+            background-color: var(--navy-blue);
+            color: white;
+            border-radius: 5px 5px 0 0;
+            padding: 10px 15px;
+            margin-bottom: 10px;
+            border-bottom: none;
+            grid-template-columns: 2fr 1.5fr 110px; 
+        }
+        .login-card:last-of-type {
+            border-bottom: none;
+        }
+        
+        /* Rank List Styles */
+        #ranks-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 0;
+            background-color: #f9f9f9;
+            overflow: hidden;
+        }
+        .rank-card {
+            display: grid;
+            grid-template-columns: 1fr 110px;
+            align-items: center;
+            padding: 12px 15px;
+            background-color: #fff;
+            border-bottom: 1px solid #eee;
+            font-size: 1em;
+            text-align: left;
+        }
+        .rank-card.header-row {
+            font-weight: bold;
+            background-color: var(--navy-blue);
+            color: white;
+            padding: 12px 15px;
+            border-bottom: 1px solid #ddd;
+            grid-template-columns: 1fr 110px;
+        }
+        .rank-card:last-of-type {
+            border-bottom: none;
+        }
+        
+        /* Officer/Admin Registration Form Styles */
+        #officer-register-form, #admin-register-form, #recruitment-log-form {
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            background-color: #fff;
+            margin-top: 20px;
+        }
+        #register-status, #admin-register-status, #log-recruitment-status {
+            margin-top: 15px;
+            font-weight: bold;
+            color: var(--success-color);
+            min-height: 1.2em; /* Ensure space is reserved */
+            text-align: center;
+        }
+        .text-center {
+            text-align: center;
+        }
+        
+        /* Action Button Container */
+        .action-buttons {
+            display: flex;
+            gap: 5px;
+            justify-content: flex-end;
+        }
+
+        /* Edit/Delete Button Styles */
+        .delete-btn, .edit-btn {
+            color: white;
+            padding: 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: bold;
+            width: 50px; 
+            height: 30px;
+            transition: background-color 0.3s ease;
+            margin: 0;
+        }
+        .delete-btn {
+            background-color: var(--error-color);
+        }
+        .delete-btn:hover {
+            background-color: #a0101e;
+        }
+        .edit-btn {
+            background-color: var(--edit-color);
+        }
+        .edit-btn:hover {
+            background-color: var(--edit-hover-color);
+        }
+
+
+        /* Event List Styles */
+        #events-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        /* Collapsible Section Styles */
+        .collapsible-section {
+            margin-bottom: 15px;
+        }
+        .collapsible-header {
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.2s ease;
+        }
+        .collapsible-header:hover {
+            background-color: #004080 !important;
+        }
+        .collapse-icon {
+            display: inline-block;
+            margin-right: 8px;
+            transition: transform 0.2s ease;
+            font-size: 0.9em;
+        }
+        .collapsible-content {
+            display: block;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+        
+        .week-header {
+            background-color: var(--navy-blue);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 15px;
+            margin-bottom: 5px;
+            font-size: 1.2em;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .week-label {
+            flex: 1;
+        }
+        .total-count {
+            background-color: var(--accent-color);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        .five-plus-count {
+            background-color: var(--error-color);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            font-weight: bold;
+            white-space: nowrap;
+            margin-left: 8px;
+        }
+        .event-card {
+            background-color: #ffffff;
+            border: 1px solid #ddd;
+            border-left: 5px solid var(--success-color); 
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            text-align: left;
+        }
+        .event-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 1px dashed #eee;
+            gap: 15px;
+        }
+        .host-info {
+            font-weight: bold;
+            color: var(--navy-blue);
+            display: flex;
+            align-items: center;
+            flex-shrink: 1;
+            flex: 1;
+            min-width: 0;
+        }
+        .host-info .event-type-badge {
+            flex-shrink: 0;
+        }
+        .time {
+            font-size: 0.85em;
+            color: #999;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .event-type-badge {
+            background-color: var(--navy-blue);
+            color: white;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            margin-right: 10px;
+            font-weight: bold;
+        }
+        .five-plus-badge {
+            background-color: var(--error-color);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .event-detail-line {
+            font-size: 1.1em;
+            margin: 5px 0 10px 0;
+            padding: 5px 0;
+            color: var(--navy-blue);
+            font-weight: 500;
+        }
+        .logger-info {
+            display: block;
+            text-align: right;
+            font-size: 0.75em;
+            color: #999;
+            margin-top: 5px;
+        }
+        /* Event Log Form Styles */
+        #event-log-form {
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            background-color: #fff;
+            margin-top: 20px;
+        }
+        #log-status {
+            margin-top: 15px;
+            font-weight: bold;
+            color: var(--success-color);
+            min-height: 1.2em; 
+            text-align: center;
+        }
+
+        /* --- NEW: Recruitment List Styles --- */
+        #recruitments-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .month-header {
+            background-color: var(--navy-blue);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 15px;
+            margin-bottom: 5px;
+            font-size: 1.2em;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .month-label {
+            flex: 1;
+        }
+        .recruitment-card {
+            background-color: #ffffff;
+            border: 1px solid #ddd;
+            border-left: 5px solid var(--edit-color); /* New color */
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            text-align: left;
+        }
+        .recruitment-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 1px dashed #eee;
+        }
+        .recruiter-info {
+            font-weight: bold;
+            color: var(--navy-blue);
+            display: flex;
+            align-items: center;
+        }
+        .recruit-info-line {
+            font-size: 1.1em;
+            margin: 5px 0 10px 0;
+            padding: 5px 0;
+            color: var(--navy-blue);
+            font-weight: 500;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .recruit-username {
+            font-weight: bold;
+        }
+        .discord-status-yes {
+            color: var(--success-color);
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        .discord-status-no {
+            color: var(--error-color);
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        .checkbox-group input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            margin: 0;
+            flex-shrink: 0;
+        }
+        .checkbox-group label {
+            margin-bottom: 0; 
+            font-weight: normal; 
+            color: var(--text-color);
+        }
+        /* --- End New Styles --- */
+
+        /* --- NEW: Rally Styles --- */
+        #rallies-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .rally-card {
+            background-color: #ffffff;
+            border: 1px solid #ddd;
+            border-left: 5px solid #9c27b0;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            text-align: left;
+        }
+        .rally-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding-bottom: 5px;
+            border-bottom: 1px dashed #eee;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        .rally-header .host-info {
+            font-weight: bold;
+            color: var(--navy-blue);
+            display: flex;
+            align-items: center;
+            flex-shrink: 1;
+            flex: 1;
+            min-width: 0;
+            gap: 10px;
+        }
+        .rally-header .time {
+            font-size: 0.85em;
+            color: #999;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .rally-time-badge {
+            background-color: #9c27b0;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+        .rally-screenshot {
+            width: 100%;
+            max-width: 400px;
+            height: auto;
+            border-radius: 5px;
+            margin: 10px 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .rally-screenshot-preview {
+            width: 100%;
+            max-width: 200px;
+            height: auto;
+            border-radius: 5px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .rally-detail-line {
+            font-size: 1.1em;
+            margin: 5px 0 10px 0;
+            padding: 5px 0;
+            color: var(--navy-blue);
+            font-weight: 500;
+        }
+        #rally-log-form {
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            background-color: #fff;
+            margin-top: 20px;
+        }
+        #log-rally-status {
+            margin-top: 15px;
+            font-weight: bold;
+            color: var(--success-color);
+            min-height: 1.2em;
+            text-align: center;
+        }
+        /* --- End Rally Styles --- */
+
+
+        /* Modal Styles */
+        .modal-overlay {
+            display: none; 
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.5); 
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: auto;
+            padding: 30px;
+            border: 1px solid #888;
+            border-radius: 10px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            text-align: left;
+        }
+        .modal-content h3 {
+            text-align: center;
+            color: var(--navy-blue);
+            margin-top: 0;
+        }
+        .modal-buttons {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .modal-buttons button {
+            width: auto;
+            padding: 10px 20px;
+        }
+        .modal-buttons .cancel-btn {
+            background-color: #6c757d;
+        }
+        .modal-buttons .cancel-btn:hover {
+            background-color: #5a6268;
+        }
+        #edit-status, #admin-edit-status {
+            text-align: center;
+            color: var(--error-color);
+            font-weight: bold;
+            min-height: 1.2em;
+            margin-top: 15px;
+        }
+        
+    </style>
+</head>
+<body onload="setupFirebase()">
+
+    <div id="login-box" class="container">
+        <h1>High Command Access</h1>
+        <p>Fish Legion - Restricted Access</p>
+        
+        <form id="loginForm">
+            <div class="input-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" placeholder="Enter High Command Username" required>
+            </div>
+            
+            <div class="input-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" placeholder="Enter Password" required>
+            </div>
+            
+            <button type="submit" id="loginButton">Log In</button>
+            <p id="error-message" class="error-text"></p>
+        </form>
+    </div>
+
+    <div id="main-panel" class="container" style="display: none;">
+        <div class="panel-header">
+            <span>Fish Legion Command Console</span>
+            <button onclick="logout()">Log Out</button>
+        </div>
+
+        <div class="tabs">
+            <button id="tab-home" class="tab-button" onclick="openTab('home')">Home</button>
+            <button id="tab-announcements" class="tab-button" onclick="openTab('announcements')">Announcements</button>
+            <button id="tab-officers" class="tab-button" onclick="openTab('officers')">Officers</button> 
+            <button id="tab-events" class="tab-button" onclick="openTab('events')">Events</button> 
+            <button id="tab-rallies" class="tab-button" onclick="openTab('rallies')">Rallies</button> <!-- NEW -->
+            <button id="tab-recruitments" class="tab-button" onclick="openTab('recruitments')">Recruitments</button> <!-- NEW -->
+            <button id="tab-admin" class="tab-button" onclick="openTab('admin')" style="display: none;">Admin</button>
+        </div>
+
+        <div id="home" class="tab-content">
+            <h2>Command Center Overview</h2>
+            <p>Quick access to essential Fish Legion High Command functions.</p>
+
+            <div class="home-buttons-grid">
+                <div class="home-button important" onclick="showPostForm()">
+                    Make Announcement
+                </div>
+                <div class="home-button" onclick="showRegisterForm()">
+                    Register Officer
+                </div>
+                <div class="home-button" onclick="showLogForm()"> 
+                    Log Event
+                </div>
+                <div class="home-button" onclick="showLogRallyForm()"> <!-- NEW -->
+                    Log Rally
+                </div>
+                <div class="home-button" onclick="showLogRecruitmentForm()"> <!-- NEW -->
+                    Log Recruitment
+                </div>
+            </div>
+        </div>
+        
+        <div id="announcements" class="tab-content" style="display: none;">
+            
+            <div id="announcement-view-area">
+                <h3 class="text-center">Active Announcements</h3>
+                <div id="announcements-list">
+                    <p class="text-center">Loading announcements...</p>
+                </div>
+                <button onclick="showPostForm()" style="margin-top: 20px; max-width: 300px; float: right;">New Announcement</button>
+            </div>
+            
+            <div id="announcement-post-form" style="display: none;">
+                <h3>Create New Announcement</h3>
+                <form id="postForm" onsubmit="handlePostForm(event)">
+                    <div class="input-group">
+                        <textarea id="announcement-input" rows="6" placeholder="Write your announcement here (Max 500 characters)" maxlength="500" required></textarea>
+                    </div>
+                    <button type="submit">Post to All Clients</button>
+                </form>
+                <p id="post-status"></p>
+                <button class="panel-header button" style="background-color: #6c757d; margin-top: 10px; max-width: 150px;" onclick="hidePostForm()">Cancel</button>
+            </div>
+
+        </div>
+        
+        <div id="officers" class="tab-content" style="display: none;">
+            
+            <div id="officer-view-area">
+                <h3 class="text-center">Registered Officers and Rank</h3>
+                <div id="officers-list">
+                    <p class="text-center">Loading officer list...</p>
+                </div>
+                <button onclick="showRegisterForm()" style="margin-top: 20px; max-width: 300px; float: right;">Register New Officer</button>
+            </div>
+            
+            <div id="officer-register-form" style="display: none;">
+                <h3>Register New Officer</h3>
+                <form id="registerForm" onsubmit="handleRegisterForm(event)">
+                    <div class="input-group">
+                        <label for="officer-username-input">Officer Username</label>
+                        <input type="text" id="officer-username-input" placeholder="Enter Roblox/In-Game Username" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="officer-rank-input">Current Rank In Game</label>
+                        <select id="officer-rank-input" required>
+                            <option value="" disabled selected>Select a rank</option>
+                            <option value="Junior Shark">Junior Shark</option>
+                            <option value="Reef Shark">Reef Shark</option>
+                            <option value="Hammerhead Shark">Hammerhead Shark</option>
+                            <option value="Megalodon">Megalodon</option>
+                            <option value="Reef Guardian">Reef Guardian</option>
+                            <option value="Guardian">Guardian</option>
+                            <option value="Hero">Hero</option>
+                            <option value="Angel">Angel</option>
+                            <option value="Marshal">Marshal</option>
+                            <option value="Treasurer of FISH">Treasurer of FISH</option>
+                            <option value="Profishien">Profishien</option>
+                            <option value="Angler">Angler</option>
+                            <option value="Fishing Overseer">Fishing Overseer</option>
+                            <option value="Archon">Archon</option>
+                        </select>
+                    </div>
+                    <button type="submit">Register Officer</button>
+                </form>
+                <p id="register-status"></p>
+                <button class="panel-header button" style="background-color: #6c757d; margin-top: 10px; max-width: 150px;" onclick="hideRegisterForm()">Cancel</button>
+            </div>
+
+        </div>
+        
+        <div id="events" class="tab-content" style="display: none;">
+            
+            <div id="event-view-area">
+                <h3 class="text-center">Logged Events</h3>
+                <div id="events-list">
+                    <p class="text-center">Loading event logs...</p>
+                </div>
+                <button onclick="showLogForm()" style="margin-top: 20px; max-width: 300px; float: right;">Log New Event</button>
+            </div>
+            
+            <div id="event-log-form" style="display: none;">
+                <h3>Log New Event/Training</h3>
+                <form id="logForm" onsubmit="handleLogForm(event)">
+                    <div class="input-group">
+                        <label for="event-host-select">Event Host (Officer)</label>
+                        <select id="event-host-select" required>
+                            <option value="" disabled selected>Select Event Host</option>
+                            </select>
+                    </div>
+                    <div class="input-group">
+                        <label for="event-type-select">Event Type Category</label>
+                        <select id="event-type-select" onchange="window.updateEventTypeFields()" required>
+                            <option value="Event" selected>Event</option>
+                            <option value="Training">Training</option>
+                        </select>
+                    </div>
+                    
+                    <div id="conditional-event-fields">
+                        </div>
+                    
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="event-five-plus-checkbox">
+                        <label for="event-five-plus-checkbox">Event has 5+ attendees</label>
+                    </div>
+                    
+                    <button type="submit">Log Event</button>
+                </form>
+                <p id="log-status"></p>
+                <button class="panel-header button" style="background-color: #6c757d; margin-top: 10px; max-width: 150px;" onclick="hideLogForm()">Cancel</button>
+            </div>
+
+        </div>
+        
+        <!-- --- NEW --- Rally Tab Content -->
+        <div id="rallies" class="tab-content" style="display: none;">
+            
+            <div id="rally-view-area">
+                <h3 class="text-center">Logged Rallies</h3>
+                <div id="rallies-list">
+                    <p class="text-center">Loading rally logs...</p>
+                </div>
+                <button onclick="showLogRallyForm()" style="margin-top: 20px; max-width: 300px; float: right;">Log New Rally</button>
+            </div>
+            
+            <div id="rally-log-form" style="display: none;">
+                <h3>Log New Rally</h3>
+                <form id="logRallyForm" onsubmit="handleLogRallyForm(event)">
+                    <div class="input-group">
+                        <label for="rally-host-select">Rally Host (Officer)</label>
+                        <select id="rally-host-select" required>
+                            <option value="" disabled selected>Select Rally Host</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label for="rally-time-select">Rally Time</label>
+                        <select id="rally-time-select" required>
+                            <option value="" disabled selected>Select Rally Time</option>
+                            <option value="1 AM">1 AM Rally</option>
+                            <option value="1 PM">1 PM Rally</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label for="rally-attendees-input">Number of Attendees</label>
+                        <input type="number" id="rally-attendees-input" placeholder="Enter attendee count" min="0" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="rally-screenshot-input">Upload Screenshot</label>
+                        <input type="file" id="rally-screenshot-input" accept="image/*">
+                    </div>
+                    <button type="submit">Log Rally</button>
+                </form>
+                <p id="log-rally-status"></p>
+                <button class="panel-header button" style="background-color: #6c757d; margin-top: 10px; max-width: 150px;" onclick="hideLogRallyForm()">Cancel</button>
+            </div>
+
+        </div>
+        
+        <!-- --- NEW --- Recruitment Tab Content -->
+        <div id="recruitments" class="tab-content" style="display: none;">
+            
+            <div id="recruitment-view-area">
+                <h3 class="text-center">Logged Recruitments</h3>
+                <div id="recruitments-list">
+                    <p class="text-center">Loading recruitment logs...</p>
+                </div>
+                <button onclick="showLogRecruitmentForm()" style="margin-top: 20px; max-width: 300px; float: right;">Log New Recruitment</button>
+            </div>
+            
+            <div id="recruitment-log-form" style="display: none;">
+                <h3>Log New Recruitment</h3>
+                <form id="logRecruitmentForm" onsubmit="handleLogRecruitmentForm(event)">
+                    <div class="input-group">
+                        <label for="recruiter-username-input">Recruiter Username</label>
+                        <input type="text" id="recruiter-username-input" placeholder="Enter your Roblox username" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="recruit-username-input">Recruit's Username</label>
+                        <input type="text" id="recruit-username-input" placeholder="Enter recruit's Roblox username" required>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="recruit-discord-checkbox">
+                        <label for="recruit-discord-checkbox">Is the recruit in the Discord server?</label>
+                    </div>
+                    <button type="submit">Log Recruitment</button>
+                </form>
+                <p id="log-recruitment-status"></p>
+                <button class="panel-header button" style="background-color: #6c757d; margin-top: 10px; max-width: 150px;" onclick="hideLogRecruitmentForm()">Cancel</button>
+            </div>
+
+        </div>
+        
+        <!-- Admin Tab Content -->
+        <div id="admin" class="tab-content" style="display: none;">
+            
+            <div id="admin-view-area">
+                <h3 class="text-center">Manage Panel Logins</h3>
+                <div id="admin-list">
+                    <p class="text-center">Loading logins...</p>
+                </div>
+                <button onclick="showAdminRegisterForm()" style="margin-top: 20px; max-width: 300px; float: right;">Add New Login</button>
+            </div>
+            
+            <div id="admin-register-form" style="display: none;">
+                <h3>Add New Panel Login</h3>
+                <form id="adminRegisterForm" onsubmit="handleAdminRegisterForm(event)">
+                    <div class="input-group">
+                        <label for="admin-username-input">Username</label>
+                        <input type="text" id="admin-username-input" placeholder="Enter new username" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="admin-password-input">Password</label>
+                        <input type="text" id="admin-password-input" placeholder="Enter new password" required>
+                    </div>
+                    <button type="submit">Add Login</button>
+                </form>
+                <p id="admin-register-status"></p>
+                <button class="panel-header button" style="background-color: #6c757d; margin-top: 10px; max-width: 150px;" onclick="hideAdminRegisterForm()">Cancel</button>
+            </div>
+            
+            <!-- RANK MANAGEMENT SECTION -->
+            <div id="rank-management-area" style="margin-top: 50px; padding-top: 40px; border-top: 2px solid #ccc;">
+                <h3 class="text-center">Manage Officer Ranks</h3>
+                <p class="text-center" style="color: #666;">Add, edit, or remove ranks from the system</p>
+                
+                <div style="margin-top: 15px; margin-bottom: 20px; text-align: center;">
+                    <button onclick="window.loadDefaultRanks()" style="background-color: var(--edit-color); max-width: 300px;">Load Default Ranks</button>
+                </div>
+                
+                <div style="margin-top: 20px; margin-bottom: 20px;">
+                    <h4>All Ranks</h4>
+                    <div id="ranks-list" style="border: 1px solid #ddd; border-radius: 8px; background-color: #f9f9f9; max-height: 300px; overflow-y: auto;">
+                        <p class="text-center">Loading ranks...</p>
+                    </div>
+                </div>
+                
+                <div style="margin-top: 20px; padding: 20px; border: 1px solid #ccc; border-radius: 8px; background-color: #fff;">
+                    <h4>Add New Rank</h4>
+                    <div class="input-group">
+                        <label for="rank-name-input">Rank Name</label>
+                        <input type="text" id="rank-name-input" placeholder="Enter new rank name" required>
+                    </div>
+                    <button onclick="window.addNewRank(document.getElementById('rank-name-input').value)" style="max-width: 200px;">Add Rank</button>
+                    <p id="rank-add-status" style="margin-top: 10px; color: var(--success-color); font-weight: bold;"></p>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Officer Edit Modal -->
+    <div id="edit-officer-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Edit Officer Details</h3>
+            <form id="edit-officer-form" onsubmit="handleEditForm(event)">
+                <input type="hidden" id="edit-officer-id">
+                
+                <div class="input-group">
+                    <label for="edit-officer-username">Officer Username</label>
+                    <input type="text" id="edit-officer-username" required>
+                </div>
+                
+                <div class="input-group">
+                    <label for="edit-officer-rank">Current Rank In Game</label>
+                    <select id="edit-officer-rank" required>
+                        <option value="" disabled>Select a rank</option>
+                        <option value="Junior Shark">Junior Shark</option>
+                        <option value="Reef Shark">Reef Shark</option>
+                        <option value="Hammerhead Shark">Hammerhead Shark</option>
+                        <option value="Megalodon">Megalodon</option>
+                        <option value="Reef Guardian">Reef Guardian</option>
+                        <option value="Guardian">Guardian</option>
+                        <option value="Hero">Hero</option>
+                        <option value="Angel">Angel</option>
+                        <option value="Marshal">Marshal</option>
+                        <option value="Treasurer of FISH">Treasurer of FISH</option>
+                        <option value="Profishien">Profishien</option>
+                        <option value="Angler">Angler</option>
+                        <option value="Fishing Overseer">Fishing Overseer</option>
+                        <option value="Archon">Archon</option>
+                    </select>
+                </div>
+                
+                <p id="edit-status"></p>
+
+                <div class="modal-buttons">
+                    <button type="button" class="cancel-btn" onclick="hideEditModal()">Cancel</button>
+                    <button type="submit" style="background-color: var(--success-color);">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Admin Edit Modal -->
+    <div id="edit-admin-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Edit Panel Login</h3>
+            <form id="edit-admin-form" onsubmit="handleAdminEditForm(event)">
+                <input type="hidden" id="edit-admin-id">
+                
+                <div class="input-group">
+                    <label for="edit-admin-username">Username</label>
+                    <input type="text" id="edit-admin-username" required>
+                </div>
+                
+                <div class="input-group">
+                    <label for="edit-admin-password">Password</label>
+                    <input type="text" id="edit-admin-password" required>
+                </div>
+                
+                <p id="admin-edit-status"></p>
+
+                <div class="modal-buttons">
+                    <button type="button" class="cancel-btn" onclick="hideAdminEditModal()">Cancel</button>
+                    <button type="submit" style="background-color: var(--success-color);">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Rank Edit Modal -->
+    <div id="edit-rank-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Edit Rank</h3>
+            <form id="edit-rank-form" onsubmit="window.handleEditRankForm(event)">
+                <input type="hidden" id="edit-rank-id">
+                
+                <div class="input-group">
+                    <label for="edit-rank-name">Rank Name</label>
+                    <input type="text" id="edit-rank-name" required>
+                </div>
+                
+                <p id="rank-edit-status"></p>
+
+                <div class="modal-buttons">
+                    <button type="button" class="cancel-btn" onclick="window.hideRankEditModal()">Cancel</button>
+                    <button type="submit" style="background-color: var(--success-color);">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Event Edit Modal -->
+    <div id="edit-event-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Edit Event Details</h3>
+            <form id="edit-event-form" onsubmit="window.handleEventEditForm(event)">
+                <input type="hidden" id="edit-event-id">
+                
+                <div class="input-group">
+                    <label for="edit-event-host">Event Host (Officer)</label>
+                    <select id="edit-event-host" required>
+                        <option value="" disabled selected>Select Event Host</option>
+                    </select>
+                </div>
+                
+                <div class="input-group">
+                    <label for="edit-event-type">Event Type Category</label>
+                    <select id="edit-event-type" onchange="window.updateEditEventTypeFields()" required>
+                        <option value="Event">Event</option>
+                        <option value="Training">Training</option>
+                    </select>
+                </div>
+
+                <div id="edit-event-conditional-fields"></div>
+                
+                <div class="checkbox-group">
+                    <input type="checkbox" id="edit-event-five-plus-checkbox">
+                    <label for="edit-event-five-plus-checkbox">Event has 5+ attendees</label>
+                </div>
+                
+                <p id="event-edit-status"></p>
+
+                <div class="modal-buttons">
+                    <button type="button" class="cancel-btn" onclick="window.hideEventEditModal()">Cancel</button>
+                    <button type="submit" style="background-color: var(--success-color);">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+
+    <!-- Rally Edit Modal -->
+    <div id="edit-rally-modal" class="modal-overlay">
+        <div class="modal-content">
+            <h3>Edit Rally Details</h3>
+            <form id="edit-rally-form" onsubmit="window.handleRallyEditForm(event)">
+                <input type="hidden" id="edit-rally-id">
+                
+                <div class="input-group">
+                    <label for="edit-rally-host">Rally Host (Officer)</label>
+                    <select id="edit-rally-host" required>
+                        <option value="" disabled selected>Select Rally Host</option>
+                    </select>
+                </div>
+                
+                <div class="input-group">
+                    <label for="edit-rally-time">Rally Time</label>
+                    <select id="edit-rally-time" required>
+                        <option value="1 AM">1 AM Rally</option>
+                        <option value="1 PM">1 PM Rally</option>
+                    </select>
+                </div>
+
+                <div class="input-group">
+                    <label for="edit-rally-attendees">Number of Attendees</label>
+                    <input type="number" id="edit-rally-attendees" placeholder="Enter attendee count" min="0" required>
+                </div>
+
+                <div class="input-group">
+                    <label for="edit-rally-screenshot-input">Update Screenshot</label>
+                    <div id="edit-rally-screenshot-preview" style="margin-bottom: 10px;"></div>
+                    <input type="file" id="edit-rally-screenshot-input" accept="image/*">
+                </div>
+                
+                <p id="rally-edit-status"></p>
+
+                <div class="modal-buttons">
+                    <button type="button" class="cancel-btn" onclick="window.hideRallyEditModal()">Cancel</button>
+                    <button type="submit" style="background-color: var(--success-color);">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="module">
+        // Import functions exposed globally in the first script tag
+        const { 
+            postAnnouncement, 
+            setupFirebase, 
+            registerNewOfficer, 
+            deleteOfficer, 
+            updateOfficer, 
+            loadOfficers, 
+            logNewEvent, 
+            deleteEvent, 
+            loadEvents,
+            // --- NEW ---
+            loadRecruitments,
+            logNewRecruitment,
+            deleteRecruitment,
+            // ---
+            checkFirestoreLogin,
+            loadLogins,
+            registerNewLogin,
+            deleteLogin,
+            updateLogin,
+            // --- NEW: Rank Management ---
+            loadRanks,
+            addNewRank,
+            deleteRank,
+            updateRank,
+            populateRankDropdowns
+        } = window;
+        
+        const SESSION_KEY = "fishLegionHCUser";
+
+        let activeUser = null; 
+        
+        // --- LOGIN & SESSION MANAGEMENT (UPDATED) ---
+
+        document.getElementById('loginForm').addEventListener('submit', async function(event) {
+            event.preventDefault(); 
+
+            const usernameInput = document.getElementById('username');
+            const passwordInput = document.getElementById('password');
+            const errorMessage = document.getElementById('error-message');
+
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value;
+
+            errorMessage.textContent = 'Checking credentials...';
+            
+            const isAuthenticated = await window.checkFirestoreLogin(username, password);
+            
+            if (isAuthenticated) {
+                localStorage.setItem(SESSION_KEY, username);
+                completeLogin(username);
+                errorMessage.textContent = '';
+            } else {
+                errorMessage.textContent = 'Invalid Username or Password. Access Denied.';
+            }
+        });
+
+        function completeLogin(username) {
+            const loginBox = document.getElementById('login-box');
+            const mainPanel = document.getElementById('main-panel');
+            const usernameInput = document.getElementById('username');
+            const passwordInput = document.getElementById('password');
+            
+            loginBox.style.display = 'none';
+            mainPanel.style.display = 'block';
+            usernameInput.value = '';
+            passwordInput.value = '';
+            
+            activeUser = username; 
+            window.currentUsername = username; 
+            
+            const adminTab = document.getElementById('tab-admin');
+            if (username === '0breezedev' || username === 'archon') {
+                adminTab.style.display = 'block';
+            } else {
+                adminTab.style.display = 'none';
+            }
+            
+            openTab('home');
+        }
+
+        function logout() {
+            localStorage.removeItem(SESSION_KEY);
+            document.getElementById('main-panel').style.display = 'none';
+            document.getElementById('login-box').style.display = 'block';
+            document.getElementById('error-message').textContent = '';
+            document.getElementById('tab-admin').style.display = 'none';
+            activeUser = null; 
+        }
+
+        function checkSession() {
+            const savedUser = localStorage.getItem(SESSION_KEY);
+            if (savedUser) {
+                completeLogin(savedUser);
+            }
+        }
+
+        // --- TAB & VIEW SWITCHING ---
+
+        // Tab Switching Logic
+        function openTab(tabName) {
+            const tabcontents = document.getElementsByClassName("tab-content");
+            for (let i = 0; i < tabcontents.length; i++) {
+                tabcontents[i].style.display = "none";
+            }
+
+            const tabbuttons = document.getElementsByClassName("tab-button");
+            for (let i = 0; i < tabbuttons.length; i++) {
+                tabbuttons[i].classList.remove("active");
+            }
+
+            document.getElementById(tabName).style.display = "block";
+            document.getElementById(`tab-${tabName}`).classList.add("active");
+            
+            // Manage sub-views and data loading
+            hidePostForm(true);
+            hideRegisterForm(true); 
+            hideLogForm(true);
+            hideLogRallyForm(true); // --- NEW ---
+            hideLogRecruitmentForm(true); // --- NEW ---
+            hideAdminRegisterForm(true);
+            
+            if (tabName === 'officers') {
+                window.loadOfficers(); 
+            }
+            if (tabName === 'events') { 
+                window.loadEvents(); 
+            }
+            if (tabName === 'rallies') { // --- NEW ---
+                window.loadRallies();
+            }
+            if (tabName === 'recruitments') { // --- NEW ---
+                window.loadRecruitments();
+            }
+            if (tabName === 'admin') {
+                window.loadLogins();
+                window.loadRanks();
+            }
+        }
+        
+        // Announcement views
+        function showPostForm() {
+            openTab('announcements');
+            document.getElementById('announcement-view-area').style.display = 'none';
+            document.getElementById('announcement-post-form').style.display = 'block';
+            document.getElementById('post-status').textContent = '';
+            document.getElementById('announcement-input').value = '';
+        }
+
+        function hidePostForm(force = false) {
+            if (document.getElementById('announcements').style.display === 'block' || force) {
+                document.getElementById('announcement-post-form').style.display = 'none';
+                document.getElementById('announcement-view-area').style.display = 'block';
+            }
+        }
+
+        // Officer views
+        function showRegisterForm() {
+            openTab('officers'); 
+            document.getElementById('officer-view-area').style.display = 'none';
+            document.getElementById('officer-register-form').style.display = 'block';
+            document.getElementById('register-status').textContent = '';
+            document.getElementById('officer-username-input').value = '';
+            document.getElementById('officer-rank-input').value = '';
+            window.populateRankDropdowns();
+        }
+
+        function hideRegisterForm(force = false) {
+            if (document.getElementById('officers').style.display === 'block' || force) {
+                document.getElementById('officer-register-form').style.display = 'none';
+                document.getElementById('officer-view-area').style.display = 'block';
+            }
+        }
+        
+        // Event views
+        function showLogForm() {
+            openTab('events'); 
+            document.getElementById('event-view-area').style.display = 'none';
+            document.getElementById('event-log-form').style.display = 'block';
+            document.getElementById('log-status').textContent = '';
+            window.loadOfficers(true); 
+            updateEventTypeFields();
+        }
+
+        function hideLogForm(force = false) {
+            if (document.getElementById('events').style.display === 'block' || force) {
+                document.getElementById('event-log-form').style.display = 'none';
+                document.getElementById('event-view-area').style.display = 'block';
+            }
+        }
+        
+        // --- NEW --- Rally views
+        function showLogRallyForm() {
+            openTab('rallies'); 
+            document.getElementById('rally-view-area').style.display = 'none';
+            document.getElementById('rally-log-form').style.display = 'block';
+            document.getElementById('log-rally-status').textContent = '';
+            window.loadOfficers(true); 
+        }
+
+        function hideLogRallyForm(force = false) {
+            if (document.getElementById('rallies').style.display === 'block' || force) {
+                document.getElementById('rally-log-form').style.display = 'none';
+                document.getElementById('rally-view-area').style.display = 'block';
+            }
+        }
+        
+        // --- NEW --- Recruitment views
+        function showLogRecruitmentForm() {
+            openTab('recruitments'); 
+            document.getElementById('recruitment-view-area').style.display = 'none';
+            document.getElementById('recruitment-log-form').style.display = 'block';
+            document.getElementById('log-recruitment-status').textContent = '';
+            document.getElementById('recruiter-username-input').value = '';
+            document.getElementById('recruit-username-input').value = '';
+            document.getElementById('recruit-discord-checkbox').checked = false;
+        }
+
+        function hideLogRecruitmentForm(force = false) {
+            if (document.getElementById('recruitments').style.display === 'block' || force) {
+                document.getElementById('recruitment-log-form').style.display = 'none';
+                document.getElementById('recruitment-view-area').style.display = 'block';
+            }
+        }
+        
+        // Admin views
+        function showAdminRegisterForm() {
+            openTab('admin'); 
+            document.getElementById('admin-view-area').style.display = 'none';
+            document.getElementById('admin-register-form').style.display = 'block';
+            document.getElementById('admin-register-status').textContent = '';
+            document.getElementById('admin-username-input').value = '';
+            document.getElementById('admin-password-input').value = '';
+        }
+
+        function hideAdminRegisterForm(force = false) {
+            if (document.getElementById('admin').style.display === 'block' || force) {
+                document.getElementById('admin-register-form').style.display = 'none';
+                document.getElementById('admin-view-area').style.display = 'block';
+            }
+        }
+
+        // Modal Control Functions
+        function showEditModal(officerId, currentUsername, currentRank) {
+            const modal = document.getElementById('edit-officer-modal');
+            document.getElementById('edit-officer-id').value = officerId;
+            document.getElementById('edit-officer-username').value = currentUsername;
+            document.getElementById('edit-officer-rank').value = currentRank;
+            document.getElementById('edit-status').textContent = '';
+            window.populateRankDropdowns();
+            // Set the current rank after populating
+            setTimeout(() => {
+                document.getElementById('edit-officer-rank').value = currentRank;
+            }, 100);
+            modal.style.display = 'flex';
+        }
+
+        function hideEditModal() {
+            const modal = document.getElementById('edit-officer-modal');
+            modal.style.display = 'none';
+        }
+        
+        function showAdminEditModal(loginId, currentUsername, currentPassword) {
+            const modal = document.getElementById('edit-admin-modal');
+            document.getElementById('edit-admin-id').value = loginId;
+            document.getElementById('edit-admin-username').value = currentUsername;
+            document.getElementById('edit-admin-password').value = currentPassword;
+            document.getElementById('admin-edit-status').textContent = '';
+            modal.style.display = 'flex';
+        }
+
+        function hideAdminEditModal() {
+            const modal = document.getElementById('edit-admin-modal');
+            modal.style.display = 'none';
+        }
+
+        // Event Type conditional fields
+        function updateEventTypeFields() {
+            const typeSelect = document.getElementById('event-type-select');
+            const fieldsContainer = document.getElementById('conditional-event-fields');
+            const selectedType = typeSelect.value;
+            fieldsContainer.innerHTML = ''; 
+            let htmlContent = '';
+            if (selectedType === 'Event') {
+                htmlContent = `
+                    <div class="input-group">
+                        <label for="event-detail-input">Event Activity Type</label>
+                        <select id="event-detail-input" required>
+                            <option value="" disabled selected>Select Activity</option>
+                            <option value="Boat Patrol">Boat Patrol</option>
+                            <option value="Plane Patrol">Plane Patrol</option>
+                            <option value="Mixed Patrol">Mixed Patrol</option>
+                            <option value="Torpedo Chaos">Torpedo Chaos</option>
+                        </select>
+                    </div>
+                `;
+            } else if (selectedType === 'Training') {
+                htmlContent = `
+                    <div class="input-group">
+                        <label for="event-detail-input">Training Map Name</label>
+                        <input type="text" id="event-detail-input" placeholder="e.g., Arctic Outpost, Coastal Base" required>
+                    </div>
+                `;
+            }
+            fieldsContainer.innerHTML = htmlContent;
+        }
+
+        // Form submission handler for Announcements
+        function handlePostForm(event) {
+            event.preventDefault();
+            const content = document.getElementById('announcement-input').value.trim();
+            if (content.length > 0 && window.postAnnouncement) {
+                window.postAnnouncement(content); 
+            }
+        }
+
+        // Form submission handler for Officers 
+        function handleRegisterForm(event) {
+            event.preventDefault();
+            const username = document.getElementById('officer-username-input').value.trim();
+            const rank = document.getElementById('officer-rank-input').value.trim();
+            if (username.length > 0 && rank.length > 0 && window.registerNewOfficer) {
+                window.registerNewOfficer(username, rank);
+            } else {
+                 document.getElementById('register-status').textContent = 'Error: Please fill both fields.';
+            }
+        }
+
+        // Form submission handler for Edit Officer Modal
+        async function handleEditForm(event) {
+            event.preventDefault();
+            const officerId = document.getElementById('edit-officer-id').value;
+            const newUsername = document.getElementById('edit-officer-username').value.trim();
+            const newRank = document.getElementById('edit-officer-rank').value;
+            const statusEl = document.getElementById('edit-status');
+            if (!officerId || !newUsername || !newRank) {
+                statusEl.textContent = 'Error: All fields are required.';
+                return;
+            }
+            statusEl.textContent = 'Saving...';
+            statusEl.style.color = 'var(--navy-blue)';
+            const success = await window.updateOfficer(officerId, newUsername, newRank);
+            if (success) {
+                statusEl.textContent = 'Officer updated successfully!';
+                statusEl.style.color = 'var(--success-color)';
+                setTimeout(() => {
+                    hideEditModal();
+                }, 1000);
+            } else {
+                statusEl.textContent = 'Error: Could not update officer.';
+                statusEl.style.color = 'var(--error-color)';
+            }
+        }
+        
+        // Form submission handler for Events
+        function handleLogForm(event) {
+            event.preventDefault();
+            const hostSelect = document.getElementById('event-host-select');
+            const eventType = document.getElementById('event-type-select').value;
+            const detailInput = document.getElementById('event-detail-input'); 
+            const logStatus = document.getElementById('log-status');
+            const hasFivePlus = document.getElementById('event-five-plus-checkbox').checked;
+            if (!detailInput) {
+                logStatus.textContent = 'Error: Event detail field is missing.';
+                return;
+            }
+            const eventDetail = detailInput.value.trim();
+            const selectedHost = hostSelect.value;
+            if (!selectedHost) {
+                logStatus.textContent = 'Error: Please select an Event Host.';
+                return;
+            }
+            const [hostUsername, hostRank] = selectedHost.split('|');
+            if (hostUsername.length > 0 && hostRank.length > 0 && eventType.length > 0 && eventDetail.length > 0 && window.logNewEvent) {
+                window.logNewEvent(hostUsername, hostRank, eventType, eventDetail, hasFivePlus);
+            } else {
+                 logStatus.textContent = 'Error: Please fill all required fields.';
+            }
+        }
+        
+        // --- NEW --- Form submission handler for Rallies
+        function handleLogRallyForm(event) {
+            event.preventDefault();
+            const hostSelect = document.getElementById('rally-host-select');
+            const rallyTime = document.getElementById('rally-time-select').value;
+            const attendeeCount = document.getElementById('rally-attendees-input').value;
+            const screenshotInput = document.getElementById('rally-screenshot-input');
+            const statusEl = document.getElementById('log-rally-status');
+
+            const selectedHost = hostSelect.value;
+            if (!selectedHost || !rallyTime || !attendeeCount) {
+                statusEl.textContent = 'Error: Please fill all required fields.';
+                return;
+            }
+
+            const [hostUsername, hostRank] = selectedHost.split('|');
+
+            // Handle screenshot
+            if (screenshotInput.files && screenshotInput.files.length > 0) {
+                const file = screenshotInput.files[0];
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const screenshotData = e.target.result;
+                    if (window.logNewRally) {
+                        window.logNewRally(hostUsername, hostRank, rallyTime, attendeeCount, screenshotData);
+                    }
+                };
+                reader.readAsDataURL(file);
+            } else {
+                // No screenshot provided, log with null
+                if (window.logNewRally) {
+                    window.logNewRally(hostUsername, hostRank, rallyTime, attendeeCount, null);
+                }
+            }
+        }
+        
+        // --- NEW --- Form submission handler for Recruitments
+        function handleLogRecruitmentForm(event) {
+            event.preventDefault();
+            const recruiterUsername = document.getElementById('recruiter-username-input').value.trim();
+            const recruitUsername = document.getElementById('recruit-username-input').value.trim();
+            const inDiscord = document.getElementById('recruit-discord-checkbox').checked;
+            const statusEl = document.getElementById('log-recruitment-status');
+
+            if (recruiterUsername.length === 0 || recruitUsername.length === 0) {
+                 statusEl.textContent = 'Error: Please fill all username fields.';
+                 return;
+            }
+            
+            if (window.logNewRecruitment) {
+                window.logNewRecruitment(recruiterUsername, recruitUsername, inDiscord);
+            }
+        }
+        
+        // Form submission handler for Admin Register
+        function handleAdminRegisterForm(event) {
+            event.preventDefault();
+            const username = document.getElementById('admin-username-input').value.trim();
+            const password = document.getElementById('admin-password-input').value.trim();
+            if (username.length > 0 && password.length > 0 && window.registerNewLogin) {
+                window.registerNewLogin(username, password);
+            } else {
+                 document.getElementById('admin-register-status').textContent = 'Error: Please fill both fields.';
+            }
+        }
+        
+        // Form submission handler for Admin Edit Modal
+        async function handleAdminEditForm(event) {
+            event.preventDefault();
+            const loginId = document.getElementById('edit-admin-id').value;
+            const newUsername = document.getElementById('edit-admin-username').value.trim();
+            const newPassword = document.getElementById('edit-admin-password').value.trim();
+            const statusEl = document.getElementById('admin-edit-status');
+            if (!loginId || !newUsername || !newPassword) {
+                statusEl.textContent = 'Error: All fields are required.';
+                return;
+            }
+            statusEl.textContent = 'Saving...';
+            statusEl.style.color = 'var(--navy-blue)';
+            const success = await window.updateLogin(loginId, newUsername, newPassword);
+            if (success) {
+                statusEl.textContent = 'Login updated successfully!';
+                statusEl.style.color = 'var(--success-color)';
+                setTimeout(() => {
+                    hideAdminEditModal();
+                }, 1000);
+            } else {
+                statusEl.textContent = 'Error: Could not update login.';
+                statusEl.style.color = 'var(--error-color)';
+            }
+        }
+        
+        // Rank modal control functions
+        function showRankEditModal(rankId, currentName) {
+            const modal = document.getElementById('edit-rank-modal');
+            document.getElementById('edit-rank-id').value = rankId;
+            document.getElementById('edit-rank-name').value = currentName;
+            document.getElementById('rank-edit-status').textContent = '';
+            modal.style.display = 'flex';
+        }
+
+        function hideRankEditModal() {
+            const modal = document.getElementById('edit-rank-modal');
+            modal.style.display = 'none';
+        }
+
+        async function handleEditRankForm(event) {
+            event.preventDefault();
+            const rankId = document.getElementById('edit-rank-id').value;
+            const newRankName = document.getElementById('edit-rank-name').value.trim();
+            const statusEl = document.getElementById('rank-edit-status');
+            if (!rankId || !newRankName) {
+                statusEl.textContent = 'Error: Rank name is required.';
+                return;
+            }
+            statusEl.textContent = 'Saving...';
+            statusEl.style.color = 'var(--navy-blue)';
+            const success = await window.updateRank(rankId, newRankName);
+            if (success) {
+                statusEl.textContent = 'Rank updated successfully!';
+                statusEl.style.color = 'var(--success-color)';
+                setTimeout(() => {
+                    hideRankEditModal();
+                }, 1000);
+            } else {
+                statusEl.textContent = 'Error: Could not update rank.';
+                statusEl.style.color = 'var(--error-color)';
+            }
+        }
+
+        // Expose functions globally for HTML access
+        window.openTab = openTab;
+        window.logout = logout;
+        window.showPostForm = showPostForm;
+        window.hidePostForm = hidePostForm;
+        window.handlePostForm = handlePostForm;
+        window.showRegisterForm = showRegisterForm;
+        window.hideRegisterForm = hideRegisterForm;
+        window.handleRegisterForm = handleRegisterForm;
+        window.showLogForm = showLogForm; 
+        window.hideLogForm = hideLogForm; 
+        window.handleLogForm = handleLogForm; 
+        window.updateEventTypeFields = updateEventTypeFields;
+        window.showEditModal = showEditModal;
+        window.hideEditModal = hideEditModal;
+        window.handleEditForm = handleEditForm;
+        
+        // --- NEW Exposed Functions ---
+        window.showLogRallyForm = showLogRallyForm;
+        window.hideLogRallyForm = hideLogRallyForm;
+        window.handleLogRallyForm = handleLogRallyForm;
+        window.showLogRecruitmentForm = showLogRecruitmentForm;
+        window.hideLogRecruitmentForm = hideLogRecruitmentForm;
+        window.handleLogRecruitmentForm = handleLogRecruitmentForm;
+        window.showAdminRegisterForm = showAdminRegisterForm;
+        window.hideAdminRegisterForm = hideAdminRegisterForm;
+        window.handleAdminRegisterForm = handleAdminRegisterForm;
+        window.showAdminEditModal = showAdminEditModal;
+        window.hideAdminEditModal = hideAdminEditModal;
+        window.handleAdminEditForm = handleAdminEditForm;
+        
+        // --- NEW: Rank Management Exposed Functions ---
+        window.showRankEditModal = showRankEditModal;
+        window.hideRankEditModal = hideRankEditModal;
+        window.handleEditRankForm = handleEditRankForm;
+
+        // Check for existing session on page load
+        checkSession();
+    </script>
+</body>
+</html>
