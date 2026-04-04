@@ -8,12 +8,9 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        // Import updateDoc for editing and new functions for login query
         import { getFirestore, collection, onSnapshot, query, orderBy, serverTimestamp, addDoc, limit, doc, deleteDoc, updateDoc, getDocs, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-functions.js";
 
-        // --- MANDATORY FIREBASE ENVIRONMENT VARIABLES ---
-        // These variables are injected by the Canvas platform for collaborative apps.
         const appId = "1:69804423705:web:f155e8eecfa34c8a4e0888"
         const firebaseConfig = {
           apiKey: "AIzaSyALuA1aEeGCILi8aqI960Youp_0OdcZyRo",
@@ -27,18 +24,16 @@
         
         let db, auth;
         let userId = null;
-        let officerData = []; // Store officer data for event host dropdown
+        let officerData = [];
 
-        // Firebase Collection Paths
         const ANNOUNCEMENT_PATH = `announcements`; 
         const OFFICER_PATH = `officers`; 
         const EVENT_PATH = `events`; 
-        const RECRUITMENT_PATH = `recruitments`; // --- NEW ---
-        const RALLY_PATH = `rallies`; // --- NEW: Rally Management ---
+        const RECRUITMENT_PATH = `recruitments`;
+        const RALLY_PATH = `rallies`;
         const LOGIN_PATH = `panel_logins`; 
-        const RANKS_PATH = `ranks`; // --- NEW: Rank Management --- 
+        const RANKS_PATH = `ranks`; 
 
-        // Function to set up Firebase services and authentication
         async function setupFirebase() {
             try {
                 const app = initializeApp(firebaseConfig);
@@ -49,23 +44,21 @@
                     ? signInWithCustomToken(auth, initialAuthToken)
                     : signInAnonymously(auth);
 
-                // Wait for sign-in to complete
                 await signInPromise;
                 
                 onAuthStateChanged(auth, async (user) => {
                     if (user) {
                         userId = user.uid;
-                        window.currentUserId = userId; // Expose userId globally
+                        window.currentUserId = userId;
                         console.log(`Firebase Auth Complete. User ID: ${userId}`);
                         
                         await seedInitialLogins();
                         
-                        // Load all necessary data when ready
                         loadAnnouncements(); 
                         loadOfficers(); 
                         loadEvents(); 
-                        loadRecruitments(); // --- NEW ---
-                        loadRallies(); // --- NEW: Rally Management ---
+                        loadRecruitments();
+                        loadRallies();
                     } else {
                         console.log("User signed out or failed to authenticate.");
                     }
@@ -77,10 +70,7 @@
                 if(errorElement) errorElement.innerHTML = '<p class="text-center" style="color:red;">Error: Database setup failed.</p>';
             }
         }
-        
-        // --- LOGIN MANAGEMENT FUNCTIONS ---
 
-        // Seed the database with the original hardcoded logins if it's empty
         async function seedInitialLogins() {
             if (!db) return;
             try {
@@ -111,7 +101,6 @@
             }
         }
 
-        // Check credentials against Firestore
         async function checkFirestoreLogin(username, password) {
             if (!db) {
                 console.error("DB not initialized for login check.");
@@ -142,7 +131,6 @@
             }
         }
 
-        // REAL-TIME LOGIN LIST LOADER (for Admin tab)
         function loadLogins() {
             const adminList = document.getElementById('admin-list');
             
@@ -192,7 +180,6 @@
             });
         }
 
-        // ADD NEW LOGIN FUNCTION
         async function registerNewLogin(username, password) {
             if (!db) {
                 document.getElementById('admin-register-status').textContent = 'Error: Not connected to database.';
@@ -222,7 +209,6 @@
             }
         }
 
-        // DELETE LOGIN FUNCTION
         async function deleteLogin(loginId) {
             if (!db) {
                 console.error("DB is not initialized.");
@@ -248,7 +234,6 @@
             }
         }
 
-        // UPDATE LOGIN FUNCTION
         async function updateLogin(loginId, newUsername, newPassword) {
             if (!db) {
                 console.error("DB is not initialized.");
@@ -269,9 +254,8 @@
             }
         }
 
-        // --- RANK MANAGEMENT FUNCTIONS (NEW) ---
+        // --- RANK MANAGEMENT FUNCTIONS ---
 
-        // LOAD ALL RANKS
         function loadRanks() {
             const ranksList = document.getElementById('ranks-list');
             if (!db) {
@@ -291,7 +275,6 @@
                     return;
                 }
                 
-                // Add header row
                 const headerDiv = document.createElement('div');
                 headerDiv.className = 'rank-card header-row';
                 headerDiv.innerHTML = `<span>Rank Name</span><span>Actions</span>`;
@@ -318,7 +301,6 @@
             });
         }
 
-        // ADD NEW RANK
         async function addNewRank(rankName) {
             if (!db) {
                 document.getElementById('rank-add-status').textContent = 'Error: Not connected to database.';
@@ -333,7 +315,6 @@
             document.getElementById('rank-add-status').textContent = 'Adding rank...';
             
             try {
-                // Get the current count to set order
                 const snapshot = await getDocs(collection(db, RANKS_PATH));
                 const order = snapshot.size;
                 
@@ -356,7 +337,6 @@
             }
         }
 
-        // DELETE RANK
         async function deleteRank(rankId) {
             if (!db) {
                 console.error("DB is not initialized.");
@@ -375,7 +355,6 @@
             }
         }
 
-        // UPDATE RANK
         async function updateRank(rankId, newRankName) {
             if (!db) {
                 console.error("DB is not initialized.");
@@ -394,7 +373,6 @@
             }
         }
 
-        // LOAD DEFAULT RANKS
         async function loadDefaultRanks() {
             if (!db) {
                 alert('Database is not initialized.');
@@ -405,20 +383,9 @@
             if (!result) return;
             
             const defaultRanks = [
-                'Junior Shark',
-                'Reef Shark',
-                'Hammerhead Shark',
-                'Megalodon',
-                'Reef Guardian',
-                'Guardian',
-                'Hero',
-                'Angel',
-                'Marshal',
-                'Treasurer of FISH',
-                'Profishien',
-                'Angler',
-                'Fishing Overseer',
-                'Archon'
+                'Junior Shark','Reef Shark','Hammerhead Shark','Megalodon','Reef Guardian',
+                'Guardian','Hero','Angel','Marshal','Treasurer of FISH',
+                'Profishien','Angler','Fishing Overseer','Archon'
             ];
             
             try {
@@ -428,8 +395,6 @@
                 
                 for (let i = 0; i < defaultRanks.length; i++) {
                     const rankName = defaultRanks[i];
-                    
-                    // Check if rank already exists
                     const existingRank = snapshot.docs.find(doc => doc.data().name === rankName);
                     if (!existingRank) {
                         await addDoc(ranksCollection, {
@@ -450,9 +415,6 @@
             }
         }
 
-        // --- WEBHOOK ENDPOINT FOR DISCORD BOT ---
-        
-        // Function to receive webhook data from Discord bot
         async function receiveDiscordEvent(eventData) {
             if (!db) {
                 console.error("DB not initialized for webhook");
@@ -460,7 +422,6 @@
             }
             
             try {
-                // Map Discord event data to your website's event format
                 const data = {
                     hostUsername: eventData.hostUsername,
                     hostRank: eventData.hostRank,
@@ -470,7 +431,6 @@
                     timestamp: serverTimestamp()
                 };
                 
-                // Add type-specific data
                 if (eventData.eventType === 'Event') {
                     data.eventSubType = eventData.eventDetail;
                 } else if (eventData.eventType === 'Training') {
@@ -488,9 +448,8 @@
         
         window.receiveDiscordEvent = receiveDiscordEvent;
 
-        // --- OFFICER MANAGEMENT FUNCTIONS (Unchanged) ---
+        // --- OFFICER MANAGEMENT FUNCTIONS ---
         
-        // REAL-TIME OFFICER LOADER 
         function loadOfficers(forDropdown = false) {
             const officersList = document.getElementById('officers-list');
             
@@ -549,7 +508,6 @@
             });
         }
 
-        // NEW OFFICER REGISTRATION FUNCTION
         async function registerNewOfficer(username, rank) {
             if (!db) {
                 document.getElementById('register-status').textContent = 'Error: Not connected to database.';
@@ -577,7 +535,6 @@
             }
         }
 
-        // DELETE OFFICER FUNCTION
         async function deleteOfficer(officerId) {
             if (!db) {
                 console.error("DB is not initialized.");
@@ -595,7 +552,6 @@
             }
         }
 
-        // UPDATE OFFICER FUNCTION
         async function updateOfficer(officerId, newUsername, newRank) {
             if (!db) {
                 console.error("DB is not initialized.");
@@ -615,7 +571,7 @@
             }
         }
         
-        // --- EVENT MANAGEMENT FUNCTIONS (Unchanged) ---
+        // --- EVENT MANAGEMENT FUNCTIONS ---
 
         function getEventWeekStartAndEnd(date) {
             const d = new Date(date);
@@ -629,6 +585,9 @@
             return { sunday, saturday };
         }
 
+        // Store all events globally for search
+        let allEventsCache = [];
+
         function loadEvents() {
             const eventsList = document.getElementById('events-list');
             if (!db) {
@@ -641,6 +600,12 @@
             const q = query(eventsCollection, orderBy("timestamp", "desc")); 
 
             onSnapshot(q, (snapshot) => {
+                // Cache all events for search
+                allEventsCache = [];
+                snapshot.forEach((doc) => {
+                    allEventsCache.push({ id: doc.id, ...doc.data() });
+                });
+
                 const eventsByWeek = {};
                 if (snapshot.empty) {
                     eventsList.innerHTML = '<p class="text-center">No events have been logged yet.</p>';
@@ -658,7 +623,29 @@
                     eventsByWeek[weekKey].push({ ...event, id: eventId, date: eventDate });
                 });
                 eventsList.innerHTML = '';
-                // Get sorted keys
+
+                // ── SEARCH BAR (inserted once, above all weeks) ──────────────────
+                const searchWrapper = document.createElement('div');
+                searchWrapper.id = 'officer-search-wrapper';
+                searchWrapper.innerHTML = `
+                    <div class="officer-search-bar-row">
+                        <button class="search-icon-btn" id="search-toggle-btn" onclick="window.toggleOfficerSearch()" title="Search officer stats">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                            </svg>
+                        </button>
+                        <div class="search-expand-area" id="search-expand-area" style="display:none;">
+                            <input type="text" id="officer-search-input" placeholder="Search officer username…" autocomplete="off"
+                                oninput="window.runOfficerSearch()"
+                                onkeydown="if(event.key==='Escape') window.toggleOfficerSearch()">
+                            <button class="search-clear-btn" onclick="window.clearOfficerSearch()" title="Clear search">✕</button>
+                        </div>
+                    </div>
+                    <div id="officer-search-results" class="officer-search-results" style="display:none;"></div>
+                `;
+                eventsList.appendChild(searchWrapper);
+                // ────────────────────────────────────────────────────────────────
+
                 const sortedWeekKeys = Object.keys(eventsByWeek).sort((a, b) => new Date(b.split(' - ')[0]) - new Date(a.split(' - ')[0]));
 
                 for (const weekKey of sortedWeekKeys) {
@@ -677,7 +664,6 @@
                     weekContent.className = 'collapsible-content';
                     weekContent.style.display = 'none';
                     
-                    // Add click listener to toggle
                     weekHeader.addEventListener('click', () => {
                         const isCollapsed = weekContent.style.display === 'none';
                         weekContent.style.display = isCollapsed ? 'block' : 'none';
@@ -689,7 +675,6 @@
                     weekContainer.appendChild(weekContent);
                     eventsList.appendChild(weekContainer);
                     
-                    // Sort events within the week
                     const sortedEvents = eventsByWeek[weekKey].sort((a, b) => b.date - a.date);
 
                     sortedEvents.forEach(event => {
@@ -741,6 +726,151 @@
                 eventsList.innerHTML = '<p class="text-center" style="color:red;">Failed to retrieve events list.</p>';
             });
         }
+
+        // ── OFFICER SEARCH FUNCTIONS ─────────────────────────────────────────────
+
+        let searchOpen = false;
+
+        function toggleOfficerSearch() {
+            searchOpen = !searchOpen;
+            const expandArea = document.getElementById('search-expand-area');
+            const btn = document.getElementById('search-toggle-btn');
+            const resultsArea = document.getElementById('officer-search-results');
+
+            if (searchOpen) {
+                expandArea.style.display = 'flex';
+                btn.classList.add('active');
+                setTimeout(() => {
+                    const inp = document.getElementById('officer-search-input');
+                    if (inp) inp.focus();
+                }, 60);
+            } else {
+                expandArea.style.display = 'none';
+                btn.classList.remove('active');
+                resultsArea.style.display = 'none';
+                resultsArea.innerHTML = '';
+                const inp = document.getElementById('officer-search-input');
+                if (inp) inp.value = '';
+            }
+        }
+
+        function clearOfficerSearch() {
+            const inp = document.getElementById('officer-search-input');
+            if (inp) { inp.value = ''; inp.focus(); }
+            const resultsArea = document.getElementById('officer-search-results');
+            resultsArea.style.display = 'none';
+            resultsArea.innerHTML = '';
+        }
+
+        function runOfficerSearch() {
+            const inp = document.getElementById('officer-search-input');
+            const query = (inp ? inp.value : '').trim().toLowerCase();
+            const resultsArea = document.getElementById('officer-search-results');
+
+            if (!query) {
+                resultsArea.style.display = 'none';
+                resultsArea.innerHTML = '';
+                return;
+            }
+
+            // Filter events by matching host username
+            const matchingEvents = allEventsCache.filter(ev =>
+                (ev.hostUsername || '').toLowerCase().includes(query)
+            );
+
+            if (matchingEvents.length === 0) {
+                resultsArea.style.display = 'block';
+                resultsArea.innerHTML = `<div class="search-no-result">No events found for "<strong>${inp.value}</strong>"</div>`;
+                return;
+            }
+
+            // Group by officer username (case-insensitive match)
+            const byOfficer = {};
+            matchingEvents.forEach(ev => {
+                const key = (ev.hostUsername || 'Unknown').toLowerCase();
+                if (!byOfficer[key]) byOfficer[key] = { displayName: ev.hostUsername, rank: ev.hostRank, events: [] };
+                byOfficer[key].events.push(ev);
+            });
+
+            resultsArea.innerHTML = '';
+            resultsArea.style.display = 'block';
+
+            Object.values(byOfficer).forEach(officer => {
+                const evts = officer.events;
+                const eventCount      = evts.filter(e => e.eventType === 'Event').length;
+                const trainingCount   = evts.filter(e => e.eventType === 'Training').length;
+                const fivePlusEvent   = evts.filter(e => e.eventType === 'Event'    && e.hasFivePlusAttendees).length;
+                const fivePlusTraining= evts.filter(e => e.eventType === 'Training' && e.hasFivePlusAttendees).length;
+
+                // Sort events newest first
+                const sorted = [...evts].sort((a, b) => {
+                    const da = a.timestamp ? a.timestamp.toDate ? a.timestamp.toDate() : new Date(a.timestamp) : new Date(0);
+                    const db2 = b.timestamp ? b.timestamp.toDate ? b.timestamp.toDate() : new Date(b.timestamp) : new Date(0);
+                    return db2 - da;
+                });
+
+                const card = document.createElement('div');
+                card.className = 'search-result-card';
+
+                // Build individual events HTML
+                const eventRowsHTML = sorted.map(ev => {
+                    const dt = ev.timestamp ? (ev.timestamp.toDate ? ev.timestamp.toDate() : new Date(ev.timestamp)) : null;
+                    const dateStr = dt ? dt.toLocaleDateString() : 'N/A';
+                    const detail = ev.eventSubType || ev.mapName || '—';
+                    const fivePlusHTML = ev.hasFivePlusAttendees ? '<span class="sr-five-plus">5+</span>' : '';
+                    const typeClass = ev.eventType === 'Event' ? 'sr-badge-event' : 'sr-badge-training';
+                    return `
+                        <div class="sr-event-row">
+                            <span class="sr-type-badge ${typeClass}">${ev.eventType}</span>
+                            <span class="sr-detail">${detail}</span>
+                            ${fivePlusHTML}
+                            <span class="sr-date">${dateStr}</span>
+                        </div>`;
+                }).join('');
+
+                card.innerHTML = `
+                    <div class="sr-header">
+                        <div class="sr-officer-info">
+                            <span class="sr-username">${officer.displayName}</span>
+                            <span class="sr-rank">${officer.rank || ''}</span>
+                        </div>
+                        <div class="sr-totals">
+                            <div class="sr-stat-group">
+                                <div class="sr-stat-item sr-stat-event">
+                                    <span class="sr-stat-label">Events</span>
+                                    <span class="sr-stat-val">${eventCount}</span>
+                                </div>
+                                <div class="sr-stat-item sr-stat-training">
+                                    <span class="sr-stat-label">Trainings</span>
+                                    <span class="sr-stat-val">${trainingCount}</span>
+                                </div>
+                                <div class="sr-stat-item sr-stat-fiveplus-e">
+                                    <span class="sr-stat-label">5+ Events</span>
+                                    <span class="sr-stat-val">${fivePlusEvent}</span>
+                                </div>
+                                <div class="sr-stat-item sr-stat-fiveplus-t">
+                                    <span class="sr-stat-label">5+ Training</span>
+                                    <span class="sr-stat-val">${fivePlusTraining}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sr-events-list">
+                        <div class="sr-events-header">All Hosted Events (${evts.length})</div>
+                        <div class="sr-events-scroll">
+                            ${eventRowsHTML}
+                        </div>
+                    </div>
+                `;
+                resultsArea.appendChild(card);
+            });
+        }
+
+        window.toggleOfficerSearch = toggleOfficerSearch;
+        window.clearOfficerSearch = clearOfficerSearch;
+        window.runOfficerSearch = runOfficerSearch;
+
+        // ── END OFFICER SEARCH ───────────────────────────────────────────────────
         
         async function logNewEvent(hostUsername, hostRank, eventType, eventDetail, hasFivePlusAttendees) {
             if (!db) {
@@ -822,7 +952,6 @@
             const dropdown = document.getElementById('event-host-select');
             dropdown.innerHTML = '<option value="" disabled selected>Select Event Host</option>'; 
             if (officerData && officerData.length > 0) {
-                // Sort officers alphabetically
                 const sortedOfficers = [...officerData].sort((a, b) => a.username.localeCompare(b.username));
                 sortedOfficers.forEach(officer => {
                     const option = document.createElement('option');
@@ -838,7 +967,6 @@
                 dropdown.appendChild(option);
             }
 
-            // Also populate edit-event-host dropdown if present (for edit modal)
             const editDropdown = document.getElementById('edit-event-host');
             if (editDropdown) {
                 editDropdown.innerHTML = '<option value="" disabled selected>Select Event Host</option>';
@@ -860,7 +988,6 @@
             }
         }
 
-        // POPULATE RANK DROPDOWNS FROM FIRESTORE
         async function populateRankDropdowns() {
             if (!db) {
                 console.error("DB is not initialized.");
@@ -877,7 +1004,6 @@
                     ranks.push(doc.data().name);
                 });
                 
-                // Update officer registration dropdown
                 const registerDropdown = document.getElementById('officer-rank-input');
                 if (registerDropdown) {
                     registerDropdown.innerHTML = '<option value="" disabled selected>Select a rank</option>';
@@ -889,7 +1015,6 @@
                     });
                 }
                 
-                // Update officer edit modal dropdown
                 const editDropdown = document.getElementById('edit-officer-rank');
                 if (editDropdown) {
                     editDropdown.innerHTML = '<option value="" disabled>Select a rank</option>';
@@ -905,8 +1030,7 @@
             }
         }
 
-        
-        // --- NEW: RECRUITMENT MANAGEMENT FUNCTIONS ---
+        // --- RECRUITMENT MANAGEMENT FUNCTIONS ---
 
         function loadRecruitments() {
             const recruitmentsList = document.getElementById('recruitments-list');
@@ -929,7 +1053,6 @@
                     const recDate = rec.timestamp ? rec.timestamp.toDate() : new Date();
                     const recId = doc.id;
                     
-                    // Format to "Month Year" e.g., "November 2025"
                     const monthKey = recDate.toLocaleString('default', { month: 'long', year: 'numeric' });
                     
                     if (!recruitmentsByMonth[monthKey]) {
@@ -940,11 +1063,10 @@
                 
                 recruitmentsList.innerHTML = '';
                 
-                // Get sorted keys (months)
                 const sortedMonthKeys = Object.keys(recruitmentsByMonth).sort((a, b) => {
                     const dateA = new Date(a);
                     const dateB = new Date(b);
-                    return dateB - dateA; // Sort descending
+                    return dateB - dateA;
                 });
 
                 for (const monthKey of sortedMonthKeys) {
@@ -961,7 +1083,6 @@
                     monthContent.className = 'collapsible-content';
                     monthContent.style.display = 'none';
                     
-                    // Add click listener to toggle
                     monthHeader.addEventListener('click', () => {
                         const isCollapsed = monthContent.style.display === 'none';
                         monthContent.style.display = isCollapsed ? 'block' : 'none';
@@ -973,10 +1094,9 @@
                     monthContainer.appendChild(monthContent);
                     recruitmentsList.appendChild(monthContainer);
                     
-                    // Events are already sorted by timestamp (desc) from the query
                     recruitmentsByMonth[monthKey].forEach(rec => {
                         const recDiv = document.createElement('div');
-                        recDiv.className = 'recruitment-card'; // Use new class
+                        recDiv.className = 'recruitment-card';
                         const timestamp = rec.date.toLocaleString();
                         
                         const discordStatus = rec.inDiscord 
@@ -1056,7 +1176,7 @@
             }
         }
 
-        // --- NEW: RALLY MANAGEMENT FUNCTIONS ---
+        // --- RALLY MANAGEMENT FUNCTIONS ---
 
         function getRallyWeekStartAndEnd(date) {
             const d = new Date(date);
@@ -1099,7 +1219,6 @@
                     ralliesByWeek[weekKey].push({ ...rally, id: rallyId, date: rallyDate });
                 });
                 ralliesList.innerHTML = '';
-                // Get sorted keys
                 const sortedWeekKeys = Object.keys(ralliesByWeek).sort((a, b) => new Date(b.split(' - ')[0]) - new Date(a.split(' - ')[0]));
 
                 for (const weekKey of sortedWeekKeys) {
@@ -1116,7 +1235,6 @@
                     weekContent.className = 'collapsible-content';
                     weekContent.style.display = 'none';
 
-                    // Add click listener to toggle
                     weekHeader.addEventListener('click', () => {
                         const isCollapsed = weekContent.style.display === 'none';
                         weekContent.style.display = isCollapsed ? 'block' : 'none';
@@ -1128,7 +1246,6 @@
                     weekContainer.appendChild(weekContent);
                     ralliesList.appendChild(weekContainer);
 
-                    // Sort rallies within the week
                     const sortedRallies = ralliesByWeek[weekKey].sort((a, b) => b.date - a.date);
 
                     sortedRallies.forEach(rally => {
@@ -1270,7 +1387,6 @@
                 dropdown.appendChild(option);
             }
 
-            // Also populate edit-rally-host dropdown if present
             const editDropdown = document.getElementById('edit-rally-host');
             if (editDropdown) {
                 editDropdown.innerHTML = '<option value="" disabled selected>Select Rally Host</option>';
@@ -1292,7 +1408,6 @@
             }
         }
 
-        // Rally Edit Modal Functions
         function showRallyEditModal(rallyId, hostUsername, hostRank, rallyTime, attendeeCount, screenshotData) {
             const modal = document.getElementById('edit-rally-modal');
             if (!modal) {
@@ -1305,7 +1420,6 @@
             document.getElementById('edit-rally-attendees').value = attendeeCount;
             document.getElementById('rally-edit-status').textContent = '';
 
-            // Populate the officer dropdown
             const editHostDropdown = document.getElementById('edit-rally-host');
             editHostDropdown.innerHTML = '<option value="" disabled>Select Rally Host</option>';
 
@@ -1319,10 +1433,8 @@
                 });
             }
 
-            // Set the current host selection
             editHostDropdown.value = `${hostUsername}|${hostRank}`;
 
-            // Store the current screenshot data
             if (screenshotData) {
                 document.getElementById('edit-rally-screenshot-preview').innerHTML = `<img src="${screenshotData}" class="rally-screenshot-preview" alt="Current Screenshot">`;
                 document.getElementById('edit-rally-screenshot-input').value = '';
@@ -1373,7 +1485,6 @@
                     return;
                 }
             } else {
-                // Check if there's an existing image
                 const existingImg = document.getElementById('edit-rally-screenshot-preview').querySelector('img');
                 screenshotData = existingImg ? existingImg.src : null;
             }
@@ -1394,10 +1505,7 @@
             }
         }
 
-        // --- END: RALLY MANAGEMENT FUNCTIONS ---
-
-
-        // --- ANNOUNCEMENT MANAGEMENT FUNCTIONS (Unchanged) ---
+        // --- ANNOUNCEMENT MANAGEMENT FUNCTIONS ---
 
         function loadAnnouncements() {
             if (!db) {
@@ -1473,7 +1581,6 @@
             }
         }
         
-        // Event Edit Modal Functions - CLEAN REWRITE
         function showEventEditModal(eventId, hostUsername, hostRank, eventType, eventDetail, hasFivePlusAttendees) {
             console.log('showEventEditModal called with:', {eventId, hostUsername, hostRank, eventType, eventDetail, hasFivePlusAttendees});
             
@@ -1488,7 +1595,6 @@
             document.getElementById('edit-event-five-plus-checkbox').checked = hasFivePlusAttendees;
             document.getElementById('event-edit-status').textContent = '';
 
-            // Populate the officer dropdown
             const editHostDropdown = document.getElementById('edit-event-host');
             editHostDropdown.innerHTML = '<option value="" disabled>Select Event Host</option>';
             
@@ -1502,13 +1608,9 @@
                 });
             }
 
-            // Set the current host selection
             editHostDropdown.value = `${hostUsername}|${hostRank}`;
-
-            // Generate conditional fields
             window.updateEditEventTypeFields();
 
-            // Set detail value after a tiny delay to ensure field exists
             setTimeout(() => {
                 const detailInput = document.getElementById('edit-event-detail-input');
                 if (detailInput) {
@@ -1516,7 +1618,6 @@
                 }
             }, 10);
 
-            // Show modal
             modal.style.display = 'flex';
             console.log('Modal displayed');
         }
@@ -1597,6 +1698,7 @@
                 statusEl.style.color = 'var(--error-color)';
             }
         }
+
         window.setupFirebase = setupFirebase;
         window.postAnnouncement = postAnnouncement;
         window.registerNewOfficer = registerNewOfficer; 
@@ -1607,13 +1709,9 @@
         window.deleteEvent = deleteEvent; 
         window.updateEvent = updateEvent;
         window.loadEvents = loadEvents; 
-        
-        // --- NEW Exposed Recruitment Functions ---
         window.loadRecruitments = loadRecruitments;
         window.logNewRecruitment = logNewRecruitment;
         window.deleteRecruitment = deleteRecruitment;
-        
-        // --- NEW: Exposed Rally Functions ---
         window.loadRallies = loadRallies;
         window.logNewRally = logNewRally;
         window.deleteRally = deleteRally;
@@ -1621,23 +1719,17 @@
         window.showRallyEditModal = showRallyEditModal;
         window.hideRallyEditModal = hideRallyEditModal;
         window.handleRallyEditForm = handleRallyEditForm;
-        
-        // --- Exposed Login Functions ---
         window.checkFirestoreLogin = checkFirestoreLogin;
         window.loadLogins = loadLogins;
         window.registerNewLogin = registerNewLogin;
         window.deleteLogin = deleteLogin;
         window.updateLogin = updateLogin;
-        
-        // --- Exposed Rank Management Functions ---
         window.loadRanks = loadRanks;
         window.addNewRank = addNewRank;
         window.deleteRank = deleteRank;
         window.updateRank = updateRank;
         window.loadDefaultRanks = loadDefaultRanks;
         window.populateRankDropdowns = populateRankDropdowns;
-
-        // --- Exposed Event Edit Functions ---
         window.showEventEditModal = showEventEditModal;
         window.hideEventEditModal = hideEventEditModal;
         window.handleEventEditForm = handleEventEditForm;
@@ -1669,7 +1761,7 @@
             min-height: 100vh;
             margin: 0;
             padding: 20px;
-            box-sizing: border-box; /* Added for better sizing */
+            box-sizing: border-box;
         }
 
         .container {
@@ -1678,10 +1770,10 @@
             border-radius: 10px;
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
             width: 100%;
-            max-width: 900px; /* Increased from 800px to give more room */
+            max-width: 900px;
             text-align: center;
             color: var(--text-color);
-            box-sizing: border-box; /* Added for better sizing */
+            box-sizing: border-box;
         }
 
         #login-box {
@@ -1725,7 +1817,6 @@
             resize: vertical;
         }
 
-        /* File Input Styling */
         input[type="file"] {
             display: block;
             width: 100%;
@@ -1785,7 +1876,6 @@
             height: 1.2em;
         }
 
-        /* Main Panel Styling */
         #main-panel {
             background-color: var(--panel-bg);
             border-left: 5px solid var(--accent-color);
@@ -1814,29 +1904,28 @@
             font-size: 14px;
         }
 
-        /* Tab Navigation */
         .tabs {
             display: flex;
-            flex-wrap: nowrap; /* Changed from 'wrap' to 'nowrap' to force horizontal stacking */
+            flex-wrap: nowrap;
             background-color: #e9ecef;
             border-bottom: 1px solid #dee2e6;
             padding: 0 40px;
-            overflow-x: auto; /* Add horizontal scroll just in case */
+            overflow-x: auto;
         }
 
         .tab-button {
-            padding: 15px 20px; /* Slightly reduced padding */
+            padding: 15px 20px;
             cursor: pointer;
             border: none;
             background-color: var(--tab-inactive);
             color: var(--navy-blue);
             font-weight: bold;
-            font-size: 15px; /* Slightly reduced font size */
+            font-size: 15px;
             border-top-left-radius: 8px;
             border-top-right-radius: 8px;
             margin-right: 5px;
             transition: background-color 0.3s ease, color 0.3s ease;
-            white-space: nowrap; /* Keep text on one line */
+            white-space: nowrap;
         }
 
         .tab-button.active {
@@ -1853,7 +1942,6 @@
             border-bottom-right-radius: 10px;
         }
 
-        /* Home Tab Grid */
         .home-buttons-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
@@ -1893,7 +1981,6 @@
             border-bottom-color: #1e7e34;
         }
 
-        /* Announcement Card Styling */
         #announcements-list {
             display: flex;
             flex-direction: column;
@@ -1922,8 +2009,8 @@
         .time {
             font-size: 0.85em;
             color: #999;
-            white-space: nowrap; /* Prevent time from wrapping */
-            padding-left: 10px; /* Add space */
+            white-space: nowrap;
+            padding-left: 10px;
         }
         .rank-indicator {
             display: block;
@@ -1934,8 +2021,6 @@
             font-style: italic;
         }
 
-
-        /* Officer List Styles */
         #officers-list {
             display: flex;
             flex-direction: column;
@@ -1970,7 +2055,6 @@
             border-bottom: none;
         }
         
-        /* Panel Login List Styles */
         #admin-list {
             display: flex;
             flex-direction: column;
@@ -2005,7 +2089,6 @@
             border-bottom: none;
         }
         
-        /* Rank List Styles */
         #ranks-list {
             display: flex;
             flex-direction: column;
@@ -2038,7 +2121,6 @@
             border-bottom: none;
         }
         
-        /* Officer/Admin Registration Form Styles */
         #officer-register-form, #admin-register-form, #recruitment-log-form {
             padding: 20px;
             border: 1px solid #ccc;
@@ -2050,21 +2132,19 @@
             margin-top: 15px;
             font-weight: bold;
             color: var(--success-color);
-            min-height: 1.2em; /* Ensure space is reserved */
+            min-height: 1.2em;
             text-align: center;
         }
         .text-center {
             text-align: center;
         }
         
-        /* Action Button Container */
         .action-buttons {
             display: flex;
             gap: 5px;
             justify-content: flex-end;
         }
 
-        /* Edit/Delete Button Styles */
         .delete-btn, .edit-btn {
             color: white;
             padding: 5px;
@@ -2091,15 +2171,12 @@
             background-color: var(--edit-hover-color);
         }
 
-
-        /* Event List Styles */
         #events-list {
             display: flex;
             flex-direction: column;
             gap: 10px;
         }
         
-        /* Collapsible Section Styles */
         .collapsible-section {
             margin-bottom: 15px;
         }
@@ -2225,7 +2302,6 @@
             color: #999;
             margin-top: 5px;
         }
-        /* Event Log Form Styles */
         #event-log-form {
             padding: 20px;
             border: 1px solid #ccc;
@@ -2241,7 +2317,6 @@
             text-align: center;
         }
 
-        /* --- NEW: Recruitment List Styles --- */
         #recruitments-list {
             display: flex;
             flex-direction: column;
@@ -2265,7 +2340,7 @@
         .recruitment-card {
             background-color: #ffffff;
             border: 1px solid #ddd;
-            border-left: 5px solid var(--edit-color); /* New color */
+            border-left: 5px solid var(--edit-color);
             border-radius: 8px;
             padding: 15px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.05);
@@ -2328,9 +2403,7 @@
             font-weight: normal; 
             color: var(--text-color);
         }
-        /* --- End New Styles --- */
 
-        /* --- NEW: Rally Styles --- */
         #rallies-list {
             display: flex;
             flex-direction: column;
@@ -2416,8 +2489,270 @@
             min-height: 1.2em;
             text-align: center;
         }
-        /* --- End Rally Styles --- */
 
+        /* ── OFFICER SEARCH STYLES ──────────────────────────────────────── */
+
+        #officer-search-wrapper {
+            margin-bottom: 6px;
+        }
+
+        .officer-search-bar-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 0;
+        }
+
+        /* The square search icon button — matches total-count pill style */
+        .search-icon-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            min-width: 32px;
+            padding: 0;
+            margin: 0;
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0;
+            transition: background-color 0.2s ease, box-shadow 0.2s ease;
+            box-shadow: none;
+            flex-shrink: 0;
+        }
+        .search-icon-btn:hover {
+            background-color: var(--button-hover-darken);
+        }
+        .search-icon-btn.active {
+            background-color: var(--navy-blue);
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .search-icon-btn svg {
+            width: 15px;
+            height: 15px;
+            flex-shrink: 0;
+        }
+
+        /* Expanding search input area */
+        .search-expand-area {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            animation: searchExpand 0.2s ease forwards;
+            flex: 1;
+            min-width: 0;
+        }
+
+        @keyframes searchExpand {
+            from { opacity: 0; transform: scaleX(0.85); }
+            to   { opacity: 1; transform: scaleX(1); }
+        }
+
+        .search-expand-area input[type="text"] {
+            flex: 1;
+            padding: 6px 12px;
+            font-size: 14px;
+            border: 1.5px solid var(--accent-color);
+            border-radius: 4px;
+            background: #fff;
+            color: var(--text-color);
+            outline: none;
+            margin: 0;
+            height: 32px;
+            box-sizing: border-box;
+            min-width: 0;
+        }
+        .search-expand-area input[type="text"]:focus {
+            border-color: var(--navy-blue);
+            box-shadow: 0 0 0 2px rgba(0, 31, 63, 0.15);
+        }
+
+        .search-clear-btn {
+            width: 28px;
+            height: 28px;
+            min-width: 28px;
+            padding: 0;
+            margin: 0;
+            background: #e9ecef;
+            color: #555;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: bold;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: background-color 0.15s;
+        }
+        .search-clear-btn:hover {
+            background: #cdd0d3;
+        }
+
+        /* Search results panel */
+        .officer-search-results {
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .search-no-result {
+            padding: 14px 16px;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            color: #666;
+            font-size: 0.95em;
+            text-align: center;
+        }
+
+        /* Individual officer result card */
+        .search-result-card {
+            background: #ffffff;
+            border: 1px solid #dde3ea;
+            border-left: 4px solid var(--accent-color);
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+            overflow: hidden;
+        }
+
+        /* Top section: officer name + stat pills */
+        .sr-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            padding: 14px 16px 12px;
+            background: #f4f7fb;
+            border-bottom: 1px solid #dde3ea;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+
+        .sr-officer-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .sr-username {
+            font-size: 1.15em;
+            font-weight: 700;
+            color: var(--navy-blue);
+        }
+        .sr-rank {
+            font-size: 0.8em;
+            color: #5a6a7e;
+            font-style: italic;
+        }
+
+        /* Stat pills row */
+        .sr-totals {
+            display: flex;
+            align-items: center;
+        }
+        .sr-stat-group {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .sr-stat-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 5px 12px;
+            border-radius: 5px;
+            min-width: 60px;
+        }
+        .sr-stat-label {
+            font-size: 0.68em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            opacity: 0.85;
+        }
+        .sr-stat-val {
+            font-size: 1.25em;
+            font-weight: 800;
+            line-height: 1.2;
+        }
+        .sr-stat-event      { background: #e3f0ff; color: #0056b3; }
+        .sr-stat-training   { background: #fde8e8; color: #a01020; }
+        .sr-stat-fiveplus-e { background: #e6f4ea; color: #1a6e2e; }
+        .sr-stat-fiveplus-t { background: #fff3cd; color: #856404; }
+
+        /* Events list section */
+        .sr-events-list {
+            padding: 10px 16px 12px;
+        }
+        .sr-events-header {
+            font-size: 0.8em;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #8898aa;
+            margin-bottom: 7px;
+        }
+        .sr-events-scroll {
+            max-height: 220px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .sr-events-scroll::-webkit-scrollbar { width: 4px; }
+        .sr-events-scroll::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 2px; }
+        .sr-events-scroll::-webkit-scrollbar-thumb { background: #bbb; border-radius: 2px; }
+
+        .sr-event-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            font-size: 0.88em;
+            border: 1px solid #edf0f3;
+        }
+        .sr-type-badge {
+            font-size: 0.75em;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 3px;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .sr-badge-event    { background: var(--accent-color); color: white; }
+        .sr-badge-training { background: var(--error-color);  color: white; }
+        .sr-detail {
+            flex: 1;
+            color: #374151;
+            font-weight: 500;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .sr-five-plus {
+            background: var(--error-color);
+            color: white;
+            font-size: 0.72em;
+            font-weight: 700;
+            padding: 1px 6px;
+            border-radius: 3px;
+            flex-shrink: 0;
+        }
+        .sr-date {
+            color: #9ca3af;
+            font-size: 0.8em;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        /* ── END OFFICER SEARCH STYLES ──────────────────────────────────── */
 
         /* Modal Styles */
         .modal-overlay {
@@ -2508,8 +2843,8 @@
             <button id="tab-announcements" class="tab-button" onclick="openTab('announcements')">Announcements</button>
             <button id="tab-officers" class="tab-button" onclick="openTab('officers')">Officers</button> 
             <button id="tab-events" class="tab-button" onclick="openTab('events')">Events</button> 
-            <button id="tab-rallies" class="tab-button" onclick="openTab('rallies')">Rallies</button> <!-- NEW -->
-            <button id="tab-recruitments" class="tab-button" onclick="openTab('recruitments')">Recruitments</button> <!-- NEW -->
+            <button id="tab-rallies" class="tab-button" onclick="openTab('rallies')">Rallies</button>
+            <button id="tab-recruitments" class="tab-button" onclick="openTab('recruitments')">Recruitments</button>
             <button id="tab-admin" class="tab-button" onclick="openTab('admin')" style="display: none;">Admin</button>
         </div>
 
@@ -2527,10 +2862,10 @@
                 <div class="home-button" onclick="showLogForm()"> 
                     Log Event
                 </div>
-                <div class="home-button" onclick="showLogRallyForm()"> <!-- NEW -->
+                <div class="home-button" onclick="showLogRallyForm()">
                     Log Rally
                 </div>
-                <div class="home-button" onclick="showLogRecruitmentForm()"> <!-- NEW -->
+                <div class="home-button" onclick="showLogRecruitmentForm()">
                     Log Recruitment
                 </div>
             </div>
@@ -2622,7 +2957,7 @@
                         <label for="event-host-select">Event Host (Officer)</label>
                         <select id="event-host-select" required>
                             <option value="" disabled selected>Select Event Host</option>
-                            </select>
+                        </select>
                     </div>
                     <div class="input-group">
                         <label for="event-type-select">Event Type Category</label>
@@ -2632,8 +2967,7 @@
                         </select>
                     </div>
                     
-                    <div id="conditional-event-fields">
-                        </div>
+                    <div id="conditional-event-fields"></div>
                     
                     <div class="checkbox-group">
                         <input type="checkbox" id="event-five-plus-checkbox">
@@ -2648,7 +2982,6 @@
 
         </div>
         
-        <!-- --- NEW --- Rally Tab Content -->
         <div id="rallies" class="tab-content" style="display: none;">
             
             <div id="rally-view-area">
@@ -2692,7 +3025,6 @@
 
         </div>
         
-        <!-- --- NEW --- Recruitment Tab Content -->
         <div id="recruitments" class="tab-content" style="display: none;">
             
             <div id="recruitment-view-area">
@@ -2726,7 +3058,6 @@
 
         </div>
         
-        <!-- Admin Tab Content -->
         <div id="admin" class="tab-content" style="display: none;">
             
             <div id="admin-view-area">
@@ -2754,7 +3085,6 @@
                 <button class="panel-header button" style="background-color: #6c757d; margin-top: 10px; max-width: 150px;" onclick="hideAdminRegisterForm()">Cancel</button>
             </div>
             
-            <!-- RANK MANAGEMENT SECTION -->
             <div id="rank-management-area" style="margin-top: 50px; padding-top: 40px; border-top: 2px solid #ccc;">
                 <h3 class="text-center">Manage Officer Ranks</h3>
                 <p class="text-center" style="color: #666;">Add, edit, or remove ranks from the system</p>
@@ -2915,7 +3245,6 @@
         </div>
     </div>
 
-
     <!-- Rally Edit Modal -->
     <div id="edit-rally-modal" class="modal-overlay">
         <div class="modal-content">
@@ -2960,41 +3289,10 @@
     </div>
 
     <script type="module">
-        // Import functions exposed globally in the first script tag
-        const { 
-            postAnnouncement, 
-            setupFirebase, 
-            registerNewOfficer, 
-            deleteOfficer, 
-            updateOfficer, 
-            loadOfficers, 
-            logNewEvent, 
-            deleteEvent, 
-            loadEvents,
-            // --- NEW ---
-            loadRecruitments,
-            logNewRecruitment,
-            deleteRecruitment,
-            // ---
-            checkFirestoreLogin,
-            loadLogins,
-            registerNewLogin,
-            deleteLogin,
-            updateLogin,
-            // --- NEW: Rank Management ---
-            loadRanks,
-            addNewRank,
-            deleteRank,
-            updateRank,
-            populateRankDropdowns
-        } = window;
-        
         const SESSION_KEY = "fishLegionHCUser";
 
         let activeUser = null; 
         
-        // --- LOGIN & SESSION MANAGEMENT (UPDATED) ---
-
         document.getElementById('loginForm').addEventListener('submit', async function(event) {
             event.preventDefault(); 
 
@@ -3058,9 +3356,6 @@
             }
         }
 
-        // --- TAB & VIEW SWITCHING ---
-
-        // Tab Switching Logic
         function openTab(tabName) {
             const tabcontents = document.getElementsByClassName("tab-content");
             for (let i = 0; i < tabcontents.length; i++) {
@@ -3075,12 +3370,11 @@
             document.getElementById(tabName).style.display = "block";
             document.getElementById(`tab-${tabName}`).classList.add("active");
             
-            // Manage sub-views and data loading
             hidePostForm(true);
             hideRegisterForm(true); 
             hideLogForm(true);
-            hideLogRallyForm(true); // --- NEW ---
-            hideLogRecruitmentForm(true); // --- NEW ---
+            hideLogRallyForm(true);
+            hideLogRecruitmentForm(true);
             hideAdminRegisterForm(true);
             
             if (tabName === 'officers') {
@@ -3089,10 +3383,10 @@
             if (tabName === 'events') { 
                 window.loadEvents(); 
             }
-            if (tabName === 'rallies') { // --- NEW ---
+            if (tabName === 'rallies') {
                 window.loadRallies();
             }
-            if (tabName === 'recruitments') { // --- NEW ---
+            if (tabName === 'recruitments') {
                 window.loadRecruitments();
             }
             if (tabName === 'admin') {
@@ -3101,7 +3395,6 @@
             }
         }
         
-        // Announcement views
         function showPostForm() {
             openTab('announcements');
             document.getElementById('announcement-view-area').style.display = 'none';
@@ -3117,7 +3410,6 @@
             }
         }
 
-        // Officer views
         function showRegisterForm() {
             openTab('officers'); 
             document.getElementById('officer-view-area').style.display = 'none';
@@ -3135,7 +3427,6 @@
             }
         }
         
-        // Event views
         function showLogForm() {
             openTab('events'); 
             document.getElementById('event-view-area').style.display = 'none';
@@ -3152,7 +3443,6 @@
             }
         }
         
-        // --- NEW --- Rally views
         function showLogRallyForm() {
             openTab('rallies'); 
             document.getElementById('rally-view-area').style.display = 'none';
@@ -3168,7 +3458,6 @@
             }
         }
         
-        // --- NEW --- Recruitment views
         function showLogRecruitmentForm() {
             openTab('recruitments'); 
             document.getElementById('recruitment-view-area').style.display = 'none';
@@ -3186,7 +3475,6 @@
             }
         }
         
-        // Admin views
         function showAdminRegisterForm() {
             openTab('admin'); 
             document.getElementById('admin-view-area').style.display = 'none';
@@ -3203,7 +3491,6 @@
             }
         }
 
-        // Modal Control Functions
         function showEditModal(officerId, currentUsername, currentRank) {
             const modal = document.getElementById('edit-officer-modal');
             document.getElementById('edit-officer-id').value = officerId;
@@ -3211,7 +3498,6 @@
             document.getElementById('edit-officer-rank').value = currentRank;
             document.getElementById('edit-status').textContent = '';
             window.populateRankDropdowns();
-            // Set the current rank after populating
             setTimeout(() => {
                 document.getElementById('edit-officer-rank').value = currentRank;
             }, 100);
@@ -3237,7 +3523,6 @@
             modal.style.display = 'none';
         }
 
-        // Event Type conditional fields
         function updateEventTypeFields() {
             const typeSelect = document.getElementById('event-type-select');
             const fieldsContainer = document.getElementById('conditional-event-fields');
@@ -3268,7 +3553,6 @@
             fieldsContainer.innerHTML = htmlContent;
         }
 
-        // Form submission handler for Announcements
         function handlePostForm(event) {
             event.preventDefault();
             const content = document.getElementById('announcement-input').value.trim();
@@ -3277,7 +3561,6 @@
             }
         }
 
-        // Form submission handler for Officers 
         function handleRegisterForm(event) {
             event.preventDefault();
             const username = document.getElementById('officer-username-input').value.trim();
@@ -3289,7 +3572,6 @@
             }
         }
 
-        // Form submission handler for Edit Officer Modal
         async function handleEditForm(event) {
             event.preventDefault();
             const officerId = document.getElementById('edit-officer-id').value;
@@ -3315,7 +3597,6 @@
             }
         }
         
-        // Form submission handler for Events
         function handleLogForm(event) {
             event.preventDefault();
             const hostSelect = document.getElementById('event-host-select');
@@ -3341,7 +3622,6 @@
             }
         }
         
-        // --- NEW --- Form submission handler for Rallies
         function handleLogRallyForm(event) {
             event.preventDefault();
             const hostSelect = document.getElementById('rally-host-select');
@@ -3358,7 +3638,6 @@
 
             const [hostUsername, hostRank] = selectedHost.split('|');
 
-            // Handle screenshot
             if (screenshotInput.files && screenshotInput.files.length > 0) {
                 const file = screenshotInput.files[0];
                 const reader = new FileReader();
@@ -3370,14 +3649,12 @@
                 };
                 reader.readAsDataURL(file);
             } else {
-                // No screenshot provided, log with null
                 if (window.logNewRally) {
                     window.logNewRally(hostUsername, hostRank, rallyTime, attendeeCount, null);
                 }
             }
         }
         
-        // --- NEW --- Form submission handler for Recruitments
         function handleLogRecruitmentForm(event) {
             event.preventDefault();
             const recruiterUsername = document.getElementById('recruiter-username-input').value.trim();
@@ -3395,7 +3672,6 @@
             }
         }
         
-        // Form submission handler for Admin Register
         function handleAdminRegisterForm(event) {
             event.preventDefault();
             const username = document.getElementById('admin-username-input').value.trim();
@@ -3407,7 +3683,6 @@
             }
         }
         
-        // Form submission handler for Admin Edit Modal
         async function handleAdminEditForm(event) {
             event.preventDefault();
             const loginId = document.getElementById('edit-admin-id').value;
@@ -3433,7 +3708,6 @@
             }
         }
         
-        // Rank modal control functions
         function showRankEditModal(rankId, currentName) {
             const modal = document.getElementById('edit-rank-modal');
             document.getElementById('edit-rank-id').value = rankId;
@@ -3471,7 +3745,6 @@
             }
         }
 
-        // Expose functions globally for HTML access
         window.openTab = openTab;
         window.logout = logout;
         window.showPostForm = showPostForm;
@@ -3487,8 +3760,6 @@
         window.showEditModal = showEditModal;
         window.hideEditModal = hideEditModal;
         window.handleEditForm = handleEditForm;
-        
-        // --- NEW Exposed Functions ---
         window.showLogRallyForm = showLogRallyForm;
         window.hideLogRallyForm = hideLogRallyForm;
         window.handleLogRallyForm = handleLogRallyForm;
@@ -3501,13 +3772,10 @@
         window.showAdminEditModal = showAdminEditModal;
         window.hideAdminEditModal = hideAdminEditModal;
         window.handleAdminEditForm = handleAdminEditForm;
-        
-        // --- NEW: Rank Management Exposed Functions ---
         window.showRankEditModal = showRankEditModal;
         window.hideRankEditModal = hideRankEditModal;
         window.handleEditRankForm = handleEditRankForm;
 
-        // Check for existing session on page load
         checkSession();
     </script>
 </body>
