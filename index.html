@@ -638,6 +638,9 @@
                             <input type="text" id="officer-search-input" placeholder="Search officer username…" autocomplete="off"
                                 oninput="window.runOfficerSearch()"
                                 onkeydown="if(event.key==='Escape') window.toggleOfficerSearch()">
+                            <select id="officer-search-week" onchange="window.runOfficerSearch()" title="Filter by week">
+                                <option value="">All weeks</option>
+                            </select>
                             <button class="search-clear-btn" onclick="window.clearOfficerSearch()" title="Clear search">✕</button>
                         </div>
                     </div>
@@ -740,6 +743,7 @@
             if (searchOpen) {
                 expandArea.style.display = 'flex';
                 btn.classList.add('active');
+                populateWeekDropdown();
                 setTimeout(() => {
                     const inp = document.getElementById('officer-search-input');
                     if (inp) inp.focus();
@@ -754,9 +758,41 @@
             }
         }
 
+        function populateWeekDropdown() {
+            const weekSelect = document.getElementById('officer-search-week');
+            if (!weekSelect) return;
+
+            const weekKeys = new Set();
+            allEventsCache.forEach(ev => {
+                const date = ev.timestamp ? (ev.timestamp.toDate ? ev.timestamp.toDate() : new Date(ev.timestamp)) : new Date();
+                const dayOfWeek = date.getDay();
+                const sunday = new Date(date);
+                sunday.setHours(0,0,0,0);
+                sunday.setDate(date.getDate() - dayOfWeek);
+                const saturday = new Date(sunday);
+                saturday.setDate(sunday.getDate() + 6);
+                weekKeys.add(`${sunday.toLocaleDateString()} - ${saturday.toLocaleDateString()}`);
+            });
+
+            const currentValue = weekSelect.value;
+            weekSelect.innerHTML = '<option value="">All weeks</option>';
+
+            const sortedWeeks = [...weekKeys].sort((a, b) => new Date(b.split(' - ')[0]) - new Date(a.split(' - ')[0]));
+            sortedWeeks.forEach(wk => {
+                const opt = document.createElement('option');
+                opt.value = wk;
+                opt.textContent = `Week of ${wk.split(' - ')[0]}`;
+                weekSelect.appendChild(opt);
+            });
+
+            if (currentValue) weekSelect.value = currentValue;
+        }
+
         function clearOfficerSearch() {
             const inp = document.getElementById('officer-search-input');
             if (inp) { inp.value = ''; inp.focus(); }
+            const weekSel = document.getElementById('officer-search-week');
+            if (weekSel) weekSel.value = '';
             const resultsArea = document.getElementById('officer-search-results');
             resultsArea.style.display = 'none';
             resultsArea.innerHTML = '';
@@ -764,29 +800,50 @@
 
         function runOfficerSearch() {
             const inp = document.getElementById('officer-search-input');
-            const query = (inp ? inp.value : '').trim().toLowerCase();
+            const weekSel = document.getElementById('officer-search-week');
+            const searchQuery = (inp ? inp.value : '').trim().toLowerCase();
+            const selectedWeek = weekSel ? weekSel.value : '';
             const resultsArea = document.getElementById('officer-search-results');
 
-            if (!query) {
+            if (!searchQuery && !selectedWeek) {
                 resultsArea.style.display = 'none';
                 resultsArea.innerHTML = '';
                 return;
             }
 
-            // Filter events by matching host username
-            const matchingEvents = allEventsCache.filter(ev =>
-                (ev.hostUsername || '').toLowerCase().includes(query)
-            );
+            let filtered = allEventsCache;
 
-            if (matchingEvents.length === 0) {
+            if (searchQuery) {
+                filtered = filtered.filter(ev =>
+                    (ev.hostUsername || '').toLowerCase().includes(searchQuery)
+                );
+            }
+
+            if (selectedWeek) {
+                const parts = selectedWeek.split(' - ');
+                const weekStart = new Date(parts[0]);
+                weekStart.setHours(0,0,0,0);
+                const weekEnd = new Date(parts[1]);
+                weekEnd.setHours(23,59,59,999);
+
+                filtered = filtered.filter(ev => {
+                    const date = ev.timestamp ? (ev.timestamp.toDate ? ev.timestamp.toDate() : new Date(ev.timestamp)) : null;
+                    if (!date) return false;
+                    return date >= weekStart && date <= weekEnd;
+                });
+            }
+
+            if (filtered.length === 0) {
                 resultsArea.style.display = 'block';
-                resultsArea.innerHTML = `<div class="search-no-result">No events found for "<strong>${inp.value}</strong>"</div>`;
+                const label = searchQuery ? `"${inp.value}"` : '';
+                const weekLabel = selectedWeek ? ` in week of ${selectedWeek.split(' - ')[0]}` : '';
+                resultsArea.innerHTML = `<div class="search-no-result">No events found${label ? ` for ${label}` : ''}${weekLabel}</div>`;
                 return;
             }
 
             // Group by officer username (case-insensitive match)
             const byOfficer = {};
-            matchingEvents.forEach(ev => {
+            filtered.forEach(ev => {
                 const key = (ev.hostUsername || 'Unknown').toLowerCase();
                 if (!byOfficer[key]) byOfficer[key] = { displayName: ev.hostUsername, rank: ev.hostRank, events: [] };
                 byOfficer[key].events.push(ev);
@@ -856,7 +913,7 @@
                         </div>
                     </div>
                     <div class="sr-events-list">
-                        <div class="sr-events-header">All Hosted Events (${evts.length})</div>
+                        <div class="sr-events-header">Hosted Events (${evts.length})</div>
                         <div class="sr-events-scroll">
                             ${eventRowsHTML}
                         </div>
@@ -867,6 +924,7 @@
         }
 
         window.toggleOfficerSearch = toggleOfficerSearch;
+        window.populateWeekDropdown = populateWeekDropdown;
         window.clearOfficerSearch = clearOfficerSearch;
         window.runOfficerSearch = runOfficerSearch;
 
@@ -2503,7 +2561,6 @@
             margin-bottom: 0;
         }
 
-        /* The square search icon button — matches total-count pill style */
         .search-icon-btn {
             display: inline-flex;
             align-items: center;
@@ -2536,7 +2593,6 @@
             flex-shrink: 0;
         }
 
-        /* Expanding search input area */
         .search-expand-area {
             display: flex;
             align-items: center;
@@ -2570,6 +2626,23 @@
             box-shadow: 0 0 0 2px rgba(0, 31, 63, 0.15);
         }
 
+        #officer-search-week {
+            padding: 0 8px;
+            font-size: 13px;
+            border: 1.5px solid var(--accent-color);
+            border-radius: 4px;
+            background: #fff;
+            color: var(--text-color);
+            height: 32px;
+            box-sizing: border-box;
+            cursor: pointer;
+            white-space: nowrap;
+            flex-shrink: 0;
+            max-width: 160px;
+            width: auto;
+            margin: 0;
+        }
+
         .search-clear-btn {
             width: 28px;
             height: 28px;
@@ -2593,7 +2666,6 @@
             background: #cdd0d3;
         }
 
-        /* Search results panel */
         .officer-search-results {
             margin-top: 10px;
             display: flex;
@@ -2611,7 +2683,6 @@
             text-align: center;
         }
 
-        /* Individual officer result card */
         .search-result-card {
             background: #ffffff;
             border: 1px solid #dde3ea;
@@ -2621,7 +2692,6 @@
             overflow: hidden;
         }
 
-        /* Top section: officer name + stat pills */
         .sr-header {
             display: flex;
             align-items: flex-start;
@@ -2649,7 +2719,6 @@
             font-style: italic;
         }
 
-        /* Stat pills row */
         .sr-totals {
             display: flex;
             align-items: center;
@@ -2684,7 +2753,6 @@
         .sr-stat-fiveplus-e { background: #e6f4ea; color: #1a6e2e; }
         .sr-stat-fiveplus-t { background: #fff3cd; color: #856404; }
 
-        /* Events list section */
         .sr-events-list {
             padding: 10px 16px 12px;
         }
