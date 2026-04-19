@@ -422,11 +422,14 @@
             }
             
             try {
+                const attendeeCount = parseInt(eventData.attendeeCount) || 0;
+                const hasFivePlus = attendeeCount >= 5;
                 const data = {
                     hostUsername: eventData.hostUsername,
                     hostRank: eventData.hostRank,
                     eventType: eventData.eventType,
-                    hasFivePlusAttendees: eventData.hasFivePlusAttendees || false,
+                    attendeeCount: attendeeCount,
+                    hasFivePlusAttendees: hasFivePlus,
                     loggedBy: eventData.loggedBy || 'Discord Bot',
                     timestamp: serverTimestamp()
                 };
@@ -697,6 +700,7 @@
                             eventDiv.style.borderLeftColor = '#999';
                         }
                         const fivePlusBadge = event.hasFivePlusAttendees ? '<span class="five-plus-badge">5+</span>' : '';
+                        const attendeeCount = event.attendeeCount || 0;
                         const safeHostUsername = (event.hostUsername || 'N/A');
                         const safeHostRank = (event.hostRank || 'N/A');
                         const safeType = (event.eventType || '').replace(/'/g, "\\'");
@@ -714,11 +718,11 @@
                                 </span>
                                 <span class="time">${timestamp}</span>
                                 <div class="action-buttons">
-                                    <button class="edit-btn" onclick="window.showEventEditModal('${escapedId}', '${escapedHost}', '${escapedRank}', '${safeType}', '${safeDetail}', ${event.hasFivePlusAttendees || false})">Edit</button>
+                                    <button class="edit-btn" onclick="window.showEventEditModal('${escapedId}', '${escapedHost}', '${escapedRank}', '${safeType}', '${safeDetail}', ${attendeeCount}, ${event.hasFivePlusAttendees || false})">Edit</button>
                                     <button class="delete-btn" onclick="window.deleteEvent('${escapedId}')">X</button>
                                 </div>
                             </div>
-                            <div class="event-detail-line">${mainDetail}</div>
+                            <div class="event-detail-line">${mainDetail} <span style="margin-left: 10px; font-weight: normal; color: #666;">(${attendeeCount} attendees)</span></div>
                             <span class="logger-info">Logged by: ${event.loggedBy}</span>
                         `;
                         weekContent.appendChild(eventDiv);
@@ -859,6 +863,14 @@
                 const fivePlusEvent   = evts.filter(e => e.eventType === 'Event'    && e.hasFivePlusAttendees).length;
                 const fivePlusTraining= evts.filter(e => e.eventType === 'Training' && e.hasFivePlusAttendees).length;
 
+                // Find largest event by attendee count
+                const largestEvent = [...evts].reduce((max, ev) => {
+                    const evCount = ev.attendeeCount || 0;
+                    const maxCount = max.attendeeCount || 0;
+                    return evCount > maxCount ? ev : max;
+                }, evts[0] || {});
+                const largestEventCount = largestEvent.attendeeCount || 0;
+
                 // Sort events newest first
                 const sorted = [...evts].sort((a, b) => {
                     const da = a.timestamp ? a.timestamp.toDate ? a.timestamp.toDate() : new Date(a.timestamp) : new Date(0);
@@ -909,6 +921,10 @@
                                     <span class="sr-stat-label">5+ Training</span>
                                     <span class="sr-stat-val">${fivePlusTraining}</span>
                                 </div>
+                                <div class="sr-stat-item" style="background: #e8d5f0; color: #7a1b8a;">
+                                    <span class="sr-stat-label">Largest Event</span>
+                                    <span class="sr-stat-val">${largestEventCount}</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -930,7 +946,7 @@
 
         // ── END OFFICER SEARCH ───────────────────────────────────────────────────
         
-        async function logNewEvent(hostUsername, hostRank, eventType, eventDetail, hasFivePlusAttendees) {
+        async function logNewEvent(hostUsername, hostRank, eventType, eventDetail, attendeeCount, hasFivePlusAttendees) {
             if (!db) {
                 document.getElementById('log-status').textContent = 'Error: Not connected to database.';
                 return;
@@ -940,6 +956,7 @@
                 hostUsername: hostUsername, 
                 hostRank: hostRank,
                 eventType: eventType,
+                attendeeCount: parseInt(attendeeCount) || 0,
                 hasFivePlusAttendees: hasFivePlusAttendees || false,
                 loggedBy: window.currentUsername || 'Unknown High Command',
                 timestamp: serverTimestamp() 
@@ -952,6 +969,7 @@
             try {
                 await addDoc(collection(db, EVENT_PATH), data);
                 document.getElementById('log-status').textContent = 'Event logged successfully! Returning to list view...';
+                document.getElementById('event-attendee-count').value = '';
                 setTimeout(() => {
                     window.hideLogForm(); 
                     window.openTab('events'); 
@@ -979,7 +997,7 @@
             }
         }
         
-        async function updateEvent(eventId, hostUsername, hostRank, eventType, eventDetail, hasFivePlusAttendees) {
+        async function updateEvent(eventId, hostUsername, hostRank, eventType, eventDetail, attendeeCount, hasFivePlusAttendees) {
             if (!db) {
                 console.error("DB is not initialized.");
                 return false;
@@ -990,6 +1008,7 @@
                     hostUsername: hostUsername,
                     hostRank: hostRank,
                     eventType: eventType,
+                    attendeeCount: parseInt(attendeeCount) || 0,
                     hasFivePlusAttendees: hasFivePlusAttendees
                 };
                 if (eventType === 'Event') {
@@ -1639,8 +1658,8 @@
             }
         }
         
-        function showEventEditModal(eventId, hostUsername, hostRank, eventType, eventDetail, hasFivePlusAttendees) {
-            console.log('showEventEditModal called with:', {eventId, hostUsername, hostRank, eventType, eventDetail, hasFivePlusAttendees});
+        function showEventEditModal(eventId, hostUsername, hostRank, eventType, eventDetail, attendeeCount, hasFivePlusAttendees) {
+            console.log('showEventEditModal called with:', {eventId, hostUsername, hostRank, eventType, eventDetail, attendeeCount, hasFivePlusAttendees});
             
             const modal = document.getElementById('edit-event-modal');
             if (!modal) {
@@ -1650,7 +1669,7 @@
 
             document.getElementById('edit-event-id').value = eventId;
             document.getElementById('edit-event-type').value = eventType;
-            document.getElementById('edit-event-five-plus-checkbox').checked = hasFivePlusAttendees;
+            document.getElementById('edit-event-attendee-count').value = attendeeCount || 0;
             document.getElementById('event-edit-status').textContent = '';
 
             const editHostDropdown = document.getElementById('edit-event-host');
@@ -1723,7 +1742,9 @@
 
             const eventId = document.getElementById('edit-event-id').value;
             const eventType = document.getElementById('edit-event-type').value;
-            const hasFivePlus = document.getElementById('edit-event-five-plus-checkbox').checked;
+            const attendeeCountInput = document.getElementById('edit-event-attendee-count');
+            const attendeeCount = parseInt(attendeeCountInput.value) || 0;
+            const hasFivePlus = attendeeCount >= 5;
             const selectedHost = document.getElementById('edit-event-host').value;
             const detailInput = document.getElementById('edit-event-detail-input');
             const statusEl = document.getElementById('event-edit-status');
@@ -1744,7 +1765,7 @@
             statusEl.textContent = 'Saving...';
             statusEl.style.color = 'var(--navy-blue)';
 
-            const success = await window.updateEvent(eventId, hostUsername, hostRank, eventType, eventDetail, hasFivePlus);
+            const success = await window.updateEvent(eventId, hostUsername, hostRank, eventType, eventDetail, attendeeCount, hasFivePlus);
             if (success) {
                 statusEl.textContent = 'Event updated successfully!';
                 statusEl.style.color = 'var(--success-color)';
@@ -3037,9 +3058,9 @@
                     
                     <div id="conditional-event-fields"></div>
                     
-                    <div class="checkbox-group">
-                        <input type="checkbox" id="event-five-plus-checkbox">
-                        <label for="event-five-plus-checkbox">Event has 5+ attendees</label>
+                    <div class="input-group">
+                        <label for="event-attendee-count">Number of Attendees</label>
+                        <input type="number" id="event-attendee-count" placeholder="Enter attendee count" min="0" required>
                     </div>
                     
                     <button type="submit">Log Event</button>
@@ -3298,9 +3319,9 @@
 
                 <div id="edit-event-conditional-fields"></div>
                 
-                <div class="checkbox-group">
-                    <input type="checkbox" id="edit-event-five-plus-checkbox">
-                    <label for="edit-event-five-plus-checkbox">Event has 5+ attendees</label>
+                <div class="input-group">
+                    <label for="edit-event-attendee-count">Number of Attendees</label>
+                    <input type="number" id="edit-event-attendee-count" placeholder="Enter attendee count" min="0" required>
                 </div>
                 
                 <p id="event-edit-status"></p>
@@ -3671,7 +3692,9 @@
             const eventType = document.getElementById('event-type-select').value;
             const detailInput = document.getElementById('event-detail-input'); 
             const logStatus = document.getElementById('log-status');
-            const hasFivePlus = document.getElementById('event-five-plus-checkbox').checked;
+            const attendeeCountInput = document.getElementById('event-attendee-count');
+            const attendeeCount = parseInt(attendeeCountInput.value) || 0;
+            const hasFivePlus = attendeeCount >= 5;
             if (!detailInput) {
                 logStatus.textContent = 'Error: Event detail field is missing.';
                 return;
@@ -3684,7 +3707,7 @@
             }
             const [hostUsername, hostRank] = selectedHost.split('|');
             if (hostUsername.length > 0 && hostRank.length > 0 && eventType.length > 0 && eventDetail.length > 0 && window.logNewEvent) {
-                window.logNewEvent(hostUsername, hostRank, eventType, eventDetail, hasFivePlus);
+                window.logNewEvent(hostUsername, hostRank, eventType, eventDetail, attendeeCount, hasFivePlus);
             } else {
                  logStatus.textContent = 'Error: Please fill all required fields.';
             }
